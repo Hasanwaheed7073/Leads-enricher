@@ -325,11 +325,20 @@ class WebScout:
                 time.sleep(wait)
 
         # ── ALL RETRIES EXHAUSTED ─────────────────────────────────────────────
+        # Instead of returning an error dict (which causes downstream skipping),
+        # return a valid result with a fallback content string. This allows the
+        # lead to proceed to Agent 3, which will use deductive reasoning from
+        # the company name alone.
         logger.error("✗ Scrape failed for %s after %d attempts. Last error: %s",
                      url, MAX_RETRIES, last_error)
+        logger.info(
+            "Returning fallback context for %s — Agent 3 will infer from company name.",
+            url,
+        )
         return {
-            "url":   url,
-            "error": last_error or "Unknown scrape failure",
+            "url":     url,
+            "title":   "Website unreachable",
+            "content": "Website blocked — using company name for inference",
         }
 
     # ──────────────────────────────────────────────────────────────────────────

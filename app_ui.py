@@ -24,7 +24,7 @@ Dependencies:
     pip install streamlit pandas requests beautifulsoup4 lxml
 
 Author:     Lead Architect via Antigravity Engine
-Version:    1.0.0
+Version:    2.0.0
 ================================================================================
 """
 
@@ -354,12 +354,15 @@ with st.sidebar:
     # ── AI Provider Configuration ─────────────────────────────────────────────
     st.markdown('<div class="section-header">🤖 AI Provider</div>', unsafe_allow_html=True)
 
-    api_key = st.text_input(
-        "API Key",
+    api_keys_raw = st.text_input(
+        "API Keys (comma-separated for rotation)",
         type="password",
-        placeholder="sk-... or xai-...",
-        help="Bearer token for your AI provider (Grok, Groq, OpenRouter, etc.)",
+        placeholder="key1, key2, key3",
+        help="Enter one or more API keys separated by commas. The engine will auto-rotate on 429 rate limits.",
     )
+
+    # Parse the comma-separated keys into a clean list.
+    api_keys = [k.strip() for k in api_keys_raw.split(",") if k.strip()] if api_keys_raw else []
 
     # Provider presets for quick selection.
     provider_presets = {
@@ -395,9 +398,21 @@ with st.sidebar:
 
     model_name = st.text_input(
         "Model Name",
-        value="grok-3-mini",
-        placeholder="e.g., grok-3-mini, llama-3.1-70b",
+        value="llama-3.3-70b-versatile",
+        placeholder="e.g., llama-3.3-70b-versatile, grok-3-mini",
         help="Model identifier supported by your chosen provider.",
+    )
+
+    st.divider()
+
+    # ── Target Industry ───────────────────────────────────────────────────────
+    st.markdown('<div class="section-header">🏭 Qualification</div>', unsafe_allow_html=True)
+
+    target_industry = st.text_input(
+        "Target Industry",
+        value="HVAC Contractors",
+        placeholder="e.g., HVAC Contractors, Plumbing, Roofing",
+        help="Leads that don't match this industry will be filtered out in Phase 1.",
     )
 
     st.divider()
@@ -413,13 +428,21 @@ with st.sidebar:
         help="Courtesy delay between API calls to respect rate limits.",
     )
 
+    # Display key rotation status.
+    if api_keys:
+        st.markdown(
+            f'<div style="color:#38bdf8; font-size:0.75rem; margin-top:0.5rem;">'
+            f'🔑 {len(api_keys)} API key{"s" if len(api_keys) > 1 else ""} loaded for rotation</div>',
+            unsafe_allow_html=True,
+        )
+
     st.divider()
 
     # ── System info ───────────────────────────────────────────────────────────
     st.markdown("""
     <div style="text-align: center; padding: 1rem 0; color: #475569; font-size: 0.7rem;">
         <p style="margin: 0;">Built with ❤️ by Lead Architect</p>
-        <p style="margin: 0.2rem 0 0 0;">v1.0.0 • Zero-Cost • Self-Healing</p>
+        <p style="margin: 0.2rem 0 0 0;">v2.0.0 • Zero-Cost • Self-Healing</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -438,6 +461,33 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SESSION STATE — Persistent across Streamlit reruns.
+# This is the backbone of the two-step workflow. Phase 2 only renders
+# after Phase 1 sets `phase1_done = True`.
+# ──────────────────────────────────────────────────────────────────────────────
+if "qualified_leads" not in st.session_state:
+    st.session_state.qualified_leads = []
+if "phase1_done" not in st.session_state:
+    st.session_state.phase1_done = False
+if "phase2_done" not in st.session_state:
+    st.session_state.phase2_done = False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# COLUMN CONFIG — Shared across all dataframe renders to stay DRY.
+# All enrichment columns are TextColumn to prevent PyArrow type crashes.
+# ──────────────────────────────────────────────────────────────────────────────
+COLUMN_CONFIG = {
+    "Lead_Score": st.column_config.TextColumn("🎯 Score", help="AI-generated lead score (1–10)"),
+    "Summary":    st.column_config.TextColumn("📝 Summary", help="AI-generated business summary", width="large"),
+    "Pitch":      st.column_config.TextColumn("✉️ Pitch", help="Personalized outreach email", width="large"),
+    "Status":     st.column_config.TextColumn("Status", width="small"),
+    "Website":    st.column_config.LinkColumn("🌐 Website", width="medium"),
+    "Valid":      st.column_config.TextColumn("✅ Valid", width="small"),
+}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -473,8 +523,6 @@ if not uploaded_file:
 # ──────────────────────────────────────────────────────────────────────────────
 
 # ── AGENT 1: Ingest the uploaded CSV via a temp file ──────────────────────────
-# We save the uploaded file to a temporary path so Agent 1 can read it
-# using its native csv.DictReader logic (it expects a file path, not a buffer).
 import tempfile
 import os
 
@@ -495,14 +543,25 @@ if not validated_leads:
     )
     st.stop()
 
+total_leads = len(validated_leads)
+
 # ── Build the working DataFrame ──────────────────────────────────────────────
-# Start with Agent 1's validated data + empty enrichment columns.
 df = pd.DataFrame(validated_leads)
 df["Lead_Score"] = ""
-df["Pitch"] = ""
-df["Status"] = "⏳ Pending"
+df["Valid"]      = ""
+df["Summary"]    = ""
+df["Pitch"]      = ""
+df["Status"]     = "⏳ Pending"
 
-total_leads = len(df)
+# ── Display columns for each phase ───────────────────────────────────────────
+phase1_columns = [
+    col for col in ["Name", "Email", "Company", "Website", "Valid", "Lead_Score", "Summary", "Status"]
+    if col in df.columns
+]
+phase2_columns = [
+    col for col in ["Name", "Email", "Company", "Website", "Lead_Score", "Summary", "Pitch", "Status"]
+    if col in df.columns
+]
 
 # ── Metric Cards (pre-enrichment) ────────────────────────────────────────────
 metrics_placeholder = st.empty()
@@ -513,109 +572,76 @@ with metrics_placeholder.container():
 st.markdown('<div class="section-header">📊 Lead Spreadsheet</div>', unsafe_allow_html=True)
 
 # ── Live Data Table Placeholder ───────────────────────────────────────────────
-# This st.empty() container is the core of the "Clay experience" — it gets
-# rewritten on every loop iteration to show real-time row-by-row updates.
 table_placeholder = st.empty()
-
-# Display the initial (un-enriched) spreadsheet.
-# Columns are ordered for the best visual experience: identity first, then enrichment.
-display_columns = [
-    col for col in ["Name", "Email", "Company", "Website", "Lead_Score", "Pitch", "Status"]
-    if col in df.columns
-]
 
 with table_placeholder.container():
     st.dataframe(
-        df[display_columns],
+        df[phase1_columns],
         use_container_width=True,
         height=min(400 + (total_leads * 10), 800),
-        column_config={
-            "Lead_Score": st.column_config.TextColumn("🎯 Score", help="AI-generated lead score (1–10)"),
-            "Pitch":      st.column_config.TextColumn("✉️ Pitch", help="Personalized outreach email", width="large"),
-            "Status":     st.column_config.TextColumn("Status", width="small"),
-            "Website":    st.column_config.LinkColumn("🌐 Website", width="medium"),
-        },
+        column_config=COLUMN_CONFIG,
     )
 
-# ── Action Buttons ────────────────────────────────────────────────────────────
-col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 3])
 
-with col_btn1:
-    start_clicked = st.button(
-        "🚀 Start Enrichment",
+# ══════════════════════════════════════════════════════════════════════════════
+#   STEP 1: QUALIFY & SUMMARIZE
+# ══════════════════════════════════════════════════════════════════════════════
+
+st.markdown('<div class="section-header">🔬 Step 1: Qualify & Summarize</div>', unsafe_allow_html=True)
+
+col_q1, col_q2, _ = st.columns([1, 1, 3])
+
+with col_q1:
+    qualify_clicked = st.button(
+        "🔬 Start Qualification",
         use_container_width=True,
-        disabled=(not api_key),
-        help="Requires an API key to be set in the sidebar." if not api_key else "Launch the 3-agent pipeline.",
+        disabled=(not api_keys or not target_industry),
+        help="Scrapes websites and qualifies each lead against your target industry." if api_keys else "Add API keys in the sidebar first.",
     )
 
-with col_btn2:
-    # Pre-render a disabled download button (will be replaced after enrichment).
-    if "enriched_csv" not in st.session_state:
-        st.download_button(
-            "📥 Download CSV",
-            data=b"",
-            disabled=True,
-            use_container_width=True,
-            file_name="enriched_leads.csv",
-        )
-
-if not api_key and not start_clicked:
-    st.info("🔑 Enter your API key in the sidebar to enable enrichment.", icon="🔒")
+if not api_keys:
+    st.info("🔑 Enter your API key(s) in the sidebar to enable qualification.", icon="🔒")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# EXECUTION ENGINE — The 3-Agent Pipeline with Live UI Updates
+# PHASE 1 EXECUTION ENGINE
+# Runs Agent 2 (scrape) → Agent 3 Phase 1 (qualify_and_summarize) per lead.
+# Valid leads accumulate in session_state.qualified_leads for Phase 2.
 # ──────────────────────────────────────────────────────────────────────────────
-if start_clicked and api_key:
-    # ── Init Agents ───────────────────────────────────────────────────────────
+if qualify_clicked and api_keys:
     scout = WebScout()
     brain = LeadBrain()
 
-    # ── Progress Bar ──────────────────────────────────────────────────────────
-    progress_bar = st.progress(0, text="Initializing pipeline...")
+    progress_bar = st.progress(0, text="Initializing Phase 1...")
 
-    # ── Log Container ─────────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">📋 Live Pipeline Log</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">📋 Phase 1 — Live Log</div>', unsafe_allow_html=True)
     log_container = st.container()
 
-    # ── Tracking ──────────────────────────────────────────────────────────────
-    processed_count = 0
-    success_count   = 0
-    failed_count    = 0
-    total_score     = 0
-    run_start       = datetime.now()
+    processed_count  = 0
+    qualified_count  = 0
+    disqualified_count = 0
+    failed_count     = 0
+    total_score      = 0
+    run_start        = datetime.now()
+    qualified_leads_list = []
 
-    # ── Update metrics to "running" ───────────────────────────────────────────
     with metrics_placeholder.container():
         render_metric_cards(total=total_leads, processed=0, avg_score=0.0, status="running")
 
-    # ── ROW-BY-ROW ENRICHMENT LOOP ────────────────────────────────────────────
     for idx in range(total_leads):
         lead = validated_leads[idx]
         lead_name = lead.get("Name", f"Lead #{idx + 1}")
         company   = lead.get("Company", "Unknown")
         url       = lead.get("Website", "")
 
-        # Update status to "processing" for this row.
-        df.at[idx, "Status"] = "🔄 Processing..."
-
-        # Push the updated dataframe to the table placeholder.
+        df.at[idx, "Status"] = "🔄 Scraping..."
         with table_placeholder.container():
-            st.dataframe(
-                df[display_columns],
-                use_container_width=True,
-                height=min(400 + (total_leads * 10), 800),
-                column_config={
-                    "Lead_Score": st.column_config.NumberColumn("🎯 Score", help="AI-generated lead score (1–10)"),
-                    "Pitch":      st.column_config.TextColumn("✉️ Pitch", help="Personalized outreach email", width="large"),
-                    "Status":     st.column_config.TextColumn("Status", width="small"),
-                    "Website":    st.column_config.LinkColumn("🌐 Website", width="medium"),
-                },
-            )
+            st.dataframe(df[phase1_columns], use_container_width=True,
+                         height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
         progress_bar.progress(
-            (idx) / total_leads,
-            text=f"[{idx + 1}/{total_leads}] Processing: {company}...",
+            idx / total_leads,
+            text=f"[{idx + 1}/{total_leads}] Qualifying: {company}...",
         )
 
         try:
@@ -648,48 +674,71 @@ if start_clicked and api_key:
                         unsafe_allow_html=True,
                     )
 
-            # ── AGENT 3: Score & Pitch ────────────────────────────────────────
+            # ── AGENT 3 — Phase 1: Qualify & Summarize ────────────────────────
+            df.at[idx, "Status"] = "🧠 Qualifying..."
+            with table_placeholder.container():
+                st.dataframe(df[phase1_columns], use_container_width=True,
+                             height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+
             with log_container:
                 st.markdown(
-                    f'<div class="log-entry">🧠 Scoring & generating pitch for <b>{lead_name}</b>...</div>',
+                    f'<div class="log-entry">🧠 Qualifying <b>{lead_name}</b> against "{target_industry}"...</div>',
                     unsafe_allow_html=True,
                 )
 
-            ai_result = brain.analyze_and_pitch(
+            p1_result = brain.qualify_and_summarize(
                 lead_data=lead,
                 scraped_data=lead,
-                api_key=api_key,
+                target_industry=target_industry,
+                api_keys=api_keys,
                 api_base_url=api_base_url,
                 model_name=model_name,
             )
 
-            score = ai_result.get("lead_score", 0)
-            pitch = ai_result.get("pitch", "Error generating pitch.")
+            is_valid = p1_result.get("is_valid", False)
+            score    = p1_result.get("score", 0)
+            summary  = p1_result.get("summary", "Error.")
 
-            # ── Update the DataFrame row ──────────────────────────────────────
-            # Cast score to str() to prevent PyArrow ArrowInvalid crash.
-            # The column was initialized with "" (string), so all values must
-            # remain strings to avoid mixed-type serialization errors.
+            # Cast all values to str() to prevent PyArrow type crashes.
+            df.at[idx, "Valid"]      = "✅ Yes" if is_valid else "❌ No"
             df.at[idx, "Lead_Score"] = str(score)
-            df.at[idx, "Pitch"]     = pitch
-            df.at[idx, "Status"]    = "✅ Done"
+            df.at[idx, "Summary"]    = summary
 
-            success_count += 1
-            total_score   += score
+            if is_valid:
+                df.at[idx, "Status"] = "✅ Qualified"
+                qualified_count += 1
+                total_score += score
 
-            with log_container:
-                st.markdown(
-                    f'<div class="log-entry log-success">'
-                    f'🎯 {company} — Score: {score}/10 | '
-                    f'Pitch: {pitch[:90]}...</div>',
-                    unsafe_allow_html=True,
-                )
+                # Store the enriched lead dict for Phase 2.
+                enriched_lead = lead.copy()
+                enriched_lead["is_valid"] = True
+                enriched_lead["score"]    = score
+                enriched_lead["summary"]  = summary
+                enriched_lead["_df_idx"]  = idx  # Track original row index
+                qualified_leads_list.append(enriched_lead)
+
+                with log_container:
+                    st.markdown(
+                        f'<div class="log-entry log-success">'
+                        f'🎯 {company} — QUALIFIED | Score: {score}/10 | {summary[:80]}...</div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                df.at[idx, "Status"] = "⏭️ Disqualified"
+                disqualified_count += 1
+
+                with log_container:
+                    st.markdown(
+                        f'<div class="log-entry log-warning">'
+                        f'⏭️ {company} — DISQUALIFIED (not {target_industry}) | {summary[:80]}</div>',
+                        unsafe_allow_html=True,
+                    )
 
         except Exception as e:
-            # ── Per-row self-healing: log error, mark row, continue ────────────
             df.at[idx, "Lead_Score"] = str(0)
-            df.at[idx, "Pitch"]     = "Error — see log"
-            df.at[idx, "Status"]    = "❌ Failed"
+            df.at[idx, "Valid"]      = "❌ Error"
+            df.at[idx, "Summary"]    = "Error — see log"
+            df.at[idx, "Status"]     = "❌ Failed"
             failed_count += 1
 
             with log_container:
@@ -698,90 +747,225 @@ if start_clicked and api_key:
                     unsafe_allow_html=True,
                 )
 
-        # ── Update counters ───────────────────────────────────────────────────
+        # ── Update counters & live UI ─────────────────────────────────────────
         processed_count += 1
-        current_avg = total_score / success_count if success_count > 0 else 0.0
+        current_avg = total_score / qualified_count if qualified_count > 0 else 0.0
 
-        # ── Push updated DataFrame to the live table ──────────────────────────
-        # This is the core "Clay experience" — each row appears in real-time.
         with table_placeholder.container():
-            st.dataframe(
-                df[display_columns],
-                use_container_width=True,
-                height=min(400 + (total_leads * 10), 800),
-                column_config={
-                    "Lead_Score": st.column_config.NumberColumn("🎯 Score", help="AI-generated lead score (1–10)"),
-                    "Pitch":      st.column_config.TextColumn("✉️ Pitch", help="Personalized outreach email", width="large"),
-                    "Status":     st.column_config.TextColumn("Status", width="small"),
-                    "Website":    st.column_config.LinkColumn("🌐 Website", width="medium"),
-                },
-            )
+            st.dataframe(df[phase1_columns], use_container_width=True,
+                         height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
-        # ── Update metrics live ───────────────────────────────────────────────
         with metrics_placeholder.container():
             render_metric_cards(
-                total=total_leads,
-                processed=processed_count,
-                avg_score=current_avg,
-                status="running",
+                total=total_leads, processed=processed_count,
+                avg_score=current_avg, status="running",
             )
 
-        # ── Courtesy delay between leads ──────────────────────────────────────
         if idx < total_leads - 1:
             time.sleep(delay_seconds)
 
-    # ── PIPELINE COMPLETE ─────────────────────────────────────────────────────
-    progress_bar.progress(1.0, text="✅ Pipeline complete!")
+    # ── PHASE 1 COMPLETE ──────────────────────────────────────────────────────
+    progress_bar.progress(1.0, text="✅ Phase 1 complete!")
+    scout.close()
 
     elapsed = datetime.now() - run_start
     elapsed_str = str(elapsed).split(".")[0]
-    final_avg = total_score / success_count if success_count > 0 else 0.0
+    final_avg = total_score / qualified_count if qualified_count > 0 else 0.0
 
-    # ── Final metric update ───────────────────────────────────────────────────
     with metrics_placeholder.container():
         render_metric_cards(
-            total=total_leads,
-            processed=processed_count,
-            avg_score=final_avg,
-            status="complete",
+            total=total_leads, processed=processed_count,
+            avg_score=final_avg, status="complete",
         )
 
-    # ── Close Scout session ───────────────────────────────────────────────────
-    scout.close()
-
-    # ── Summary Toast ─────────────────────────────────────────────────────────
     st.markdown(f"""
     <div class="pipeline-toast">
         <h3 style="color: #22c55e; margin: 0 0 0.5rem 0; font-size: 1.1rem;">
-            🎯 Enrichment Complete
+            🔬 Phase 1 Complete — Qualification Results
         </h3>
         <p style="color: #94a3b8; margin: 0; font-size: 0.9rem;">
-            <b>{success_count}</b> leads scored • <b>{failed_count}</b> failed •
+            <b>{qualified_count}</b> qualified • <b>{disqualified_count}</b> disqualified •
+            <b>{failed_count}</b> failed •
             Avg Score: <b>{final_avg:.1f}/10</b> •
             Duration: <b>{elapsed_str}</b>
         </p>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Store enriched CSV in session state for the download button ────────────
-    export_df = df[display_columns].copy()
-    csv_bytes = convert_df_to_csv(export_df)
-    st.session_state["enriched_csv"] = csv_bytes
+    # ── Persist qualified leads to session state ──────────────────────────────
+    st.session_state.qualified_leads = qualified_leads_list
+    st.session_state.phase1_done     = True
+    st.session_state.phase1_df       = df.copy()  # Preserve the P1 dataframe state
+    st.session_state.phase2_done     = False       # Reset P2 on new P1 run
 
-    # ── Download Button ───────────────────────────────────────────────────────
+    # ── Download checkpoint: Qualified Leads CSV ──────────────────────────────
+    qualified_df = df[df["Valid"] == "✅ Yes"][phase1_columns].copy()
+    csv_bytes_p1 = convert_df_to_csv(qualified_df)
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     st.download_button(
-        label="📥 Download Enriched CSV",
-        data=csv_bytes,
-        file_name=f"lead_sniper_results_{timestamp}.csv",
+        label=f"📥 Download Qualified Leads CSV ({qualified_count} leads)",
+        data=csv_bytes_p1,
+        file_name=f"qualified_leads_{timestamp}.csv",
         mime="text/csv",
         use_container_width=False,
     )
 
     logger.info(
-        "Pipeline complete. Success: %d | Failed: %d | Avg: %.1f | Time: %s",
-        success_count, failed_count, final_avg, elapsed_str,
+        "Phase 1 complete. Qualified: %d | Disqualified: %d | Failed: %d | Avg: %.1f | Time: %s",
+        qualified_count, disqualified_count, failed_count, final_avg, elapsed_str,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#   STEP 2: GENERATE PITCHES (only visible after Phase 1)
+# ══════════════════════════════════════════════════════════════════════════════
+
+if st.session_state.phase1_done:
+    st.markdown('<div class="section-header">✉️ Step 2: Generate Pitches</div>', unsafe_allow_html=True)
+
+    qualified_count_p2 = len(st.session_state.qualified_leads)
+
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(56, 189, 248, 0.05) 0%, rgba(139, 92, 246, 0.05) 100%);
+                border: 1px solid rgba(56, 189, 248, 0.1); border-radius: 12px;
+                padding: 1rem 1.5rem; margin-bottom: 1rem;">
+        <p style="color: #94a3b8; margin: 0; font-size: 0.9rem;">
+            ✅ <b>{qualified_count_p2}</b> qualified leads are ready for pitch generation.
+            This will make <b>{qualified_count_p2}</b> additional AI calls.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_p1, col_p2, _ = st.columns([1, 1, 3])
+
+    with col_p1:
+        pitch_clicked = st.button(
+            "✉️ Generate Pitches",
+            use_container_width=True,
+            disabled=(qualified_count_p2 == 0 or not api_keys),
+            help="Generate personalized cold email pitches for all qualified leads.",
+        )
+
+    # ── PHASE 2 EXECUTION ENGINE ──────────────────────────────────────────────
+    if pitch_clicked and api_keys:
+        brain = LeadBrain()
+
+        # Restore the Phase 1 dataframe so we can add Pitch to it.
+        df = st.session_state.phase1_df.copy()
+
+        progress_bar_p2 = st.progress(0, text="Initializing Phase 2...")
+
+        st.markdown('<div class="section-header">📋 Phase 2 — Live Log</div>', unsafe_allow_html=True)
+        log_container_p2 = st.container()
+
+        p2_success = 0
+        p2_failed  = 0
+        run_start_p2 = datetime.now()
+
+        for q_idx, q_lead in enumerate(st.session_state.qualified_leads):
+            lead_name = q_lead.get("Name", f"Lead #{q_idx + 1}")
+            company   = q_lead.get("Company", "Unknown")
+            summary   = q_lead.get("summary", "")
+            df_row    = q_lead.get("_df_idx", q_idx)  # Original row index in the full df
+
+            df.at[df_row, "Status"] = "✉️ Pitching..."
+
+            with table_placeholder.container():
+                st.dataframe(df[phase2_columns], use_container_width=True,
+                             height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+
+            progress_bar_p2.progress(
+                q_idx / qualified_count_p2,
+                text=f"[{q_idx + 1}/{qualified_count_p2}] Pitching: {company}...",
+            )
+
+            try:
+                with log_container_p2:
+                    st.markdown(
+                        f'<div class="log-entry">✉️ [{q_idx + 1}/{qualified_count_p2}] '
+                        f'Generating pitch for <b>{lead_name}</b> at {company}...</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                p2_result = brain.generate_pitch(
+                    lead_data=q_lead,
+                    summary=summary,
+                    api_keys=api_keys,
+                    api_base_url=api_base_url,
+                    model_name=model_name,
+                )
+
+                pitch = p2_result.get("pitch", "Error generating pitch.")
+
+                df.at[df_row, "Pitch"]  = pitch
+                df.at[df_row, "Status"] = "✅ Pitched"
+                p2_success += 1
+
+                with log_container_p2:
+                    st.markdown(
+                        f'<div class="log-entry log-success">'
+                        f'✅ {company} — Pitch: {pitch[:100]}...</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            except Exception as e:
+                df.at[df_row, "Pitch"]  = "Error — see log"
+                df.at[df_row, "Status"] = "❌ Pitch Failed"
+                p2_failed += 1
+
+                with log_container_p2:
+                    st.markdown(
+                        f'<div class="log-entry log-error">❌ Pitch failed: {company} — {str(e)[:100]}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # ── Live table update ─────────────────────────────────────────────
+            with table_placeholder.container():
+                st.dataframe(df[phase2_columns], use_container_width=True,
+                             height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+
+            if q_idx < qualified_count_p2 - 1:
+                time.sleep(delay_seconds)
+
+        # ── PHASE 2 COMPLETE ──────────────────────────────────────────────────
+        progress_bar_p2.progress(1.0, text="✅ Phase 2 complete!")
+
+        elapsed_p2 = datetime.now() - run_start_p2
+        elapsed_str_p2 = str(elapsed_p2).split(".")[0]
+
+        st.markdown(f"""
+        <div class="pipeline-toast">
+            <h3 style="color: #22c55e; margin: 0 0 0.5rem 0; font-size: 1.1rem;">
+                ✉️ Phase 2 Complete — Pitches Generated
+            </h3>
+            <p style="color: #94a3b8; margin: 0; font-size: 0.9rem;">
+                <b>{p2_success}</b> pitches generated • <b>{p2_failed}</b> failed •
+                Duration: <b>{elapsed_str_p2}</b>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.session_state.phase2_done = True
+
+        # ── Download: Final Pitched CSV ───────────────────────────────────────
+        final_df = df[df["Valid"] == "✅ Yes"][phase2_columns].copy()
+        csv_bytes_p2 = convert_df_to_csv(final_df)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        st.download_button(
+            label=f"📥 Download Final Pitched CSV ({p2_success} leads)",
+            data=csv_bytes_p2,
+            file_name=f"lead_sniper_final_{timestamp}.csv",
+            mime="text/csv",
+            use_container_width=False,
+        )
+
+        logger.info(
+            "Phase 2 complete. Pitched: %d | Failed: %d | Time: %s",
+            p2_success, p2_failed, elapsed_str_p2,
+        )
+
 
 # ── Cleanup temp file ─────────────────────────────────────────────────────────
 try:
