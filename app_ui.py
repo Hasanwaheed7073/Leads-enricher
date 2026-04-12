@@ -123,7 +123,21 @@ st.markdown("""
 
     /* ── Body text ───────────────────────────────────────────────────────── */
     .stMarkdown p, .stMarkdown li, .stMarkdown span {
-        color: #374151;
+        color: #374151 !important;
+    }
+
+    /* ── Form and Widget Labels ──────────────────────────────────────────── */
+    label,
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stWidgetLabel"] span,
+    .stTextInput label p,
+    .stTextInput label span,
+    .stSelectbox label p,
+    .stSelectbox label span,
+    .stSlider label p,
+    .stSlider label span {
+        color: #4b5563 !important;
+        font-weight: 500 !important;
     }
 
     /* ── Metric cards (st.metric overrides) ──────────────────────────────── */
