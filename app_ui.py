@@ -333,6 +333,13 @@ st.markdown("""
         color: #374151 !important;
     }
 
+    /* ── Radio group label visibility ───────────────────────────────────── */
+    div[role='radiogroup'] label {
+        color: #0a1628 !important;
+        font-weight: 500 !important;
+        font-size: 0.95rem !important;
+    }
+
     /* ── Hide default Streamlit elements ──────────────────────────────────── */
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
@@ -355,26 +362,24 @@ def render_metric_cards(total: int, processed: int, avg_score: float, status: st
     }
     status_text, status_class = status_map.get(status, status_map["idle"])
 
-    st.markdown(f"""
-    <div class="metric-row">
-        <div class="metric-card">
-            <div class="metric-value">{total}</div>
-            <div class="metric-label">Total Leads</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{processed}</div>
-            <div class="metric-label">Processed</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{avg_score:.1f}</div>
-            <div class="metric-label">Avg Score</div>
-        </div>
-        <div class="metric-card">
-            <span class="status-badge {status_class}">{status_text}</span>
-            <div class="metric-label" style="margin-top: 0.5rem;">Pipeline Status</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<div class="metric-row">
+<div class="metric-card">
+<div class="metric-value">{total}</div>
+<div class="metric-label">Total Leads</div>
+</div>
+<div class="metric-card">
+<div class="metric-value">{processed}</div>
+<div class="metric-label">Processed</div>
+</div>
+<div class="metric-card">
+<div class="metric-value">{avg_score:.1f}</div>
+<div class="metric-label">Avg Score</div>
+</div>
+<div class="metric-card">
+<span class="status-badge {status_class}">{status_text}</span>
+<div class="metric-label" style="margin-top: 0.5rem;">Pipeline Status</div>
+</div>
+</div>""", unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -405,7 +410,7 @@ with st.sidebar:
     # ── Navigation ────────────────────────────────────────────────────────────
     nav_selection = st.radio(
         "Navigation",
-        options=["Dashboard", "Leads Table", "Settings"],
+        options=["📊 Dashboard", "📋 Leads Table", "⚙️ Settings"],
         index=0,
         label_visibility="collapsed",
     )
@@ -481,7 +486,7 @@ COLUMN_CONFIG = {
 # ══════════════════════════════════════════════════════════════════════════════
 #   SETTINGS PAGE
 # ══════════════════════════════════════════════════════════════════════════════
-if nav_selection == "Settings":
+if nav_selection == "⚙️ Settings":
     st.markdown('<h2 style="color: #0a1628; font-weight: 700; margin-bottom: 0.25rem;">Settings</h2>', unsafe_allow_html=True)
     st.markdown('<p style="color: #6b7280; margin-bottom: 1.5rem;">Configure your AI provider, target industry, and pipeline settings.</p>', unsafe_allow_html=True)
 
@@ -540,7 +545,7 @@ if nav_selection == "Settings":
     )
 
     st.session_state.delay_seconds = st.slider(
-        "Delay between leads (seconds)",
+        "Minimum Qualification Score",
         min_value=1,
         max_value=10,
         value=st.session_state.delay_seconds,
@@ -577,22 +582,18 @@ delay_seconds = st.session_state.delay_seconds
 # ══════════════════════════════════════════════════════════════════════════════
 #   LEADS TABLE PAGE
 # ══════════════════════════════════════════════════════════════════════════════
-if nav_selection == "Leads Table":
+if nav_selection == "📋 Leads Table":
     st.markdown('<h2 style="color: #0a1628; font-weight: 700; margin-bottom: 0.25rem;">Leads Table</h2>', unsafe_allow_html=True)
     st.markdown('<p style="color: #6b7280; margin-bottom: 1.5rem;">View Phase 1 results and generate personalized pitches.</p>', unsafe_allow_html=True)
 
     if not st.session_state.phase1_done:
-        st.markdown("""
-        <div class="ui-card" style="text-align: center; padding: 3rem 2rem;">
-            <span style="font-size: 1.5rem; opacity: 0.4; color: #9ca3af;">No data</span>
-            <h3 style="color: #6b7280; font-weight: 600; margin: 1rem 0 0.5rem 0;">
-                No leads processed yet
-            </h3>
-            <p style="color: #9ca3af; font-size: 0.9rem; max-width: 450px; margin: 0 auto;">
-                Head to the <strong>Dashboard</strong> to upload a CSV and run Phase 1 qualification first.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("""<div class="ui-card" style="text-align: center; padding: 3rem 2rem;">
+<span style="font-size: 1.5rem; opacity: 0.4; color: #9ca3af;">No data</span>
+<h3 style="color: #6b7280; font-weight: 600; margin: 1rem 0 0.5rem 0;">No leads processed yet</h3>
+<p style="color: #9ca3af; font-size: 0.9rem; max-width: 450px; margin: 0 auto;">
+Head to the <strong>Dashboard</strong> to upload a CSV and run Phase 1 qualification first.
+</p>
+</div>""", unsafe_allow_html=True)
         st.stop()
 
     # ── Phase 1 Results DataFrame ─────────────────────────────────────────────
@@ -644,14 +645,12 @@ if nav_selection == "Leads Table":
 
     qualified_count_p2 = len(st.session_state.qualified_leads)
 
-    st.markdown(f"""
-    <div class="ui-card" style="padding: 16px 20px;">
-        <p style="color: #374151; margin: 0; font-size: 0.9rem;">
-            <b>{qualified_count_p2}</b> qualified leads are ready for pitch generation.
-            This will make <b>{qualified_count_p2}</b> additional AI calls.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<div class="ui-card" style="padding: 16px 20px;">
+<p style="color: #374151; margin: 0; font-size: 0.9rem;">
+<b>{qualified_count_p2}</b> qualified leads are ready for pitch generation.
+This will make <b>{qualified_count_p2}</b> additional AI calls.
+</p>
+</div>""", unsafe_allow_html=True)
 
     col_p1, col_p2, _ = st.columns([1, 1, 3])
 
@@ -751,17 +750,13 @@ if nav_selection == "Leads Table":
         elapsed_p2 = datetime.now() - run_start_p2
         elapsed_str_p2 = str(elapsed_p2).split(".")[0]
 
-        st.markdown(f"""
-        <div class="pipeline-toast">
-            <h3 style="color: #16a34a; margin: 0 0 0.5rem 0; font-size: 1.1rem;">
-                Phase 2 Complete — Pitches Generated
-            </h3>
-            <p style="color: #6b7280; margin: 0; font-size: 0.9rem;">
-                <b>{p2_success}</b> pitches generated • <b>{p2_failed}</b> failed •
-                Duration: <b>{elapsed_str_p2}</b>
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"""<div class="pipeline-toast">
+<h3 style="color: #16a34a; margin: 0 0 0.5rem 0; font-size: 1.1rem;">Phase 2 Complete — Pitches Generated</h3>
+<p style="color: #6b7280; margin: 0; font-size: 0.9rem;">
+<b>{p2_success}</b> pitches generated • <b>{p2_failed}</b> failed •
+Duration: <b>{elapsed_str_p2}</b>
+</p>
+</div>""", unsafe_allow_html=True)
 
         st.session_state.phase2_done = True
 
@@ -829,21 +824,16 @@ if not uploaded_file:
     with metrics_placeholder.container():
         render_metric_cards(total=0, processed=0, avg_score=0.0, status="idle")
 
-    st.markdown("""
-    <div class="ui-card" style="text-align: center; padding: 3rem 2rem;">
-
-        <h3 style="color: #6b7280; font-weight: 600; margin: 1rem 0 0.5rem 0;">
-            Upload your leads CSV to get started
-        </h3>
-        <p style="color: #9ca3af; font-size: 0.9rem; max-width: 500px; margin: 0 auto;">
-            Expected columns: <code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Name</code>,
-            <code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Email</code>,
-            <code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Company</code>,
-            <code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Website</code>,
-            and more. Go to <strong>Settings</strong> to configure your AI provider.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("""<div class="ui-card" style="text-align: center; padding: 3rem 2rem;">
+<h3 style="color: #6b7280; font-weight: 600; margin: 1rem 0 0.5rem 0;">Upload your leads CSV to get started</h3>
+<p style="color: #9ca3af; font-size: 0.9rem; max-width: 500px; margin: 0 auto;">
+Expected columns: <code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Name</code>,
+<code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Email</code>,
+<code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Company</code>,
+<code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Website</code>,
+and more. Go to <strong>Settings</strong> to configure your AI provider.
+</p>
+</div>""", unsafe_allow_html=True)
 
     st.stop()
 
@@ -1108,19 +1098,15 @@ if qualify_clicked and api_keys:
             avg_score=final_avg, status="complete",
         )
 
-    st.markdown(f"""
-    <div class="pipeline-toast">
-        <h3 style="color: #16a34a; margin: 0 0 0.5rem 0; font-size: 1.1rem;">
-            Phase 1 Complete — Qualification Results
-        </h3>
-        <p style="color: #6b7280; margin: 0; font-size: 0.9rem;">
-            <b>{qualified_count}</b> qualified • <b>{disqualified_count}</b> disqualified •
-            <b>{failed_count}</b> failed •
-            Avg Score: <b>{final_avg:.1f}/10</b> •
-            Duration: <b>{elapsed_str}</b>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<div class="pipeline-toast">
+<h3 style="color: #16a34a; margin: 0 0 0.5rem 0; font-size: 1.1rem;">Phase 1 Complete — Qualification Results</h3>
+<p style="color: #6b7280; margin: 0; font-size: 0.9rem;">
+<b>{qualified_count}</b> qualified • <b>{disqualified_count}</b> disqualified •
+<b>{failed_count}</b> failed •
+Avg Score: <b>{final_avg:.1f}/10</b> •
+Duration: <b>{elapsed_str}</b>
+</p>
+</div>""", unsafe_allow_html=True)
 
     # ── Persist qualified leads to session state ──────────────────────────────
     st.session_state.qualified_leads = qualified_leads_list
