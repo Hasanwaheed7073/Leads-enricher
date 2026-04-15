@@ -256,7 +256,18 @@ def run_pipeline(api_key: str) -> None:
         try:
             # ── AGENT 2: SCRAPE ───────────────────────────────────────────────
             logger.info("  AGENT 2 ► Scraping: %s", url)
-            scraped_data = scout.scrape_website(url)
+            scraped_data = scout.scrape_website(
+                url,
+                email=lead.get("Email", ""),
+                person_name=lead.get("Name", ""),
+            )
+
+            # Merge verification signals into the lead dict.
+            lead["domain_alive"]         = scraped_data.get("domain_alive", False)
+            lead["email_found_on_page"]  = scraped_data.get("email_found_on_page", False)
+            lead["email_domain_matches"] = scraped_data.get("email_domain_matches", False)
+            lead["person_found_on_page"] = scraped_data.get("person_found_on_page", False)
+            lead["person_context"]       = scraped_data.get("person_context", "")
 
             # Merge scraped fields into the lead dict (single unified object).
             if "error" in scraped_data:

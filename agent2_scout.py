@@ -30,7 +30,10 @@ import json
 import logging
 import time
 import random
+import re
+import socket
 from typing import Optional
+from urllib.parse import urlparse, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -165,6 +168,238 @@ class WebScout:
         return headers
 
     # ──────────────────────────────────────────────────────────────────────────
+    # PRIVATE HELPER: _check_domain_alive
+    # Verifies the domain is actually registered and reachable.
+    # ──────────────────────────────────────────────────────────────────────────
+    def _check_domain_alive(self, url: str) -> bool:
+        """
+        Checks if the domain behind a URL is actually registered and reachable.
+
+        Two-layer check:
+            1. DNS resolution — can we resolve the hostname to an IP?
+            2. HTTP HEAD request — does the server respond at all?
+
+        Returns True if the domain is alive (even if it returns 403/500).
+        Returns False if DNS fails or the server is completely unreachable.
+        """
+        try:
+            parsed = urlparse(url)
+            hostname = parsed.hostname
+            if not hostname:
+                logger.warning("Cannot extract hostname from URL: %s", url)
+                return False
+
+            # ── Layer 1: DNS Resolution ───────────────────────────────────────
+            try:
+                ip = socket.gethostbyname(hostname)
+                logger.debug("DNS resolved: %s → %s", hostname, ip)
+            except socket.gaierror:
+                logger.warning("DNS resolution FAILED for: %s — domain not registered", hostname)
+                return False
+
+            # ── Layer 2: HTTP HEAD request ────────────────────────────────────
+            try:
+                resp = self.session.head(
+                    url,
+                    headers=self._get_headers(),
+                    timeout=7,
+                    allow_redirects=True,
+                )
+                logger.debug(
+                    "HEAD %s → HTTP %d (domain alive)",
+                    url, resp.status_code,
+                )
+                return True
+            except requests.exceptions.ConnectionError:
+                # DNS resolved but server refused connection — could be
+                # a parked domain or firewall. Still "alive" enough to flag.
+                logger.warning(
+                    "DNS resolved for %s but connection refused — "
+                    "domain exists but server is down.",
+                    hostname,
+                )
+                return False
+            except requests.exceptions.Timeout:
+                logger.warning("HEAD request timed out for %s — server unresponsive.", url)
+                return False
+
+        except Exception as e:
+            logger.warning("Domain liveness check failed for %s: %s", url, str(e))
+            return False
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PRIVATE HELPER: _find_email_on_page
+    # Searches for the CSV email on the scraped page content.
+    # ──────────────────────────────────────────────────────────────────────────
+    def _find_email_on_page(self, soup: BeautifulSoup, email: str, url: str) -> dict:
+        """
+        Checks if the lead's email address appears on the website.
+        Also checks if the email domain matches the website domain.
+
+        Returns:
+            dict: {
+                "email_found_on_page": bool,
+                "email_domain_matches": bool,
+            }
+        """
+        result = {
+            "email_found_on_page": False,
+            "email_domain_matches": False,
+        }
+
+        if not email or "@" not in email:
+            return result
+
+        email_lower = email.lower().strip()
+        email_domain = email_lower.split("@")[1]
+
+        # ── Check if email domain matches website domain ──────────────────
+        try:
+            parsed = urlparse(url)
+            site_domain = parsed.hostname or ""
+            # Strip 'www.' prefix for comparison
+            site_domain_clean = site_domain.lower().replace("www.", "")
+            email_domain_clean = email_domain.lower()
+
+            # Check if email domain matches or is a subdomain of the site
+            if email_domain_clean == site_domain_clean:
+                result["email_domain_matches"] = True
+            elif site_domain_clean.endswith("." + email_domain_clean):
+                result["email_domain_matches"] = True
+            elif email_domain_clean.endswith("." + site_domain_clean):
+                result["email_domain_matches"] = True
+
+            # Flag known dummy/generic email domains
+            DUMMY_DOMAINS = {
+                "example.com", "example.org", "example.net",
+                "test.com", "test.org", "sample.com",
+                "placeholder.com", "fake.com", "dummy.com",
+                "email.com", "mail.com", "noemail.com",
+            }
+            if email_domain_clean in DUMMY_DOMAINS:
+                result["email_domain_matches"] = False
+                logger.warning(
+                    "Email '%s' uses a known dummy domain: %s",
+                    email, email_domain_clean,
+                )
+
+        except Exception as e:
+            logger.debug("Email domain comparison failed: %s", str(e))
+
+        # ── Check if exact email appears in page text ─────────────────────
+        page_text = soup.get_text(separator=" ", strip=True).lower()
+        if email_lower in page_text:
+            result["email_found_on_page"] = True
+            logger.debug("Email '%s' found in page text.", email)
+            return result
+
+        # ── Check mailto: links ───────────────────────────────────────────
+        for a_tag in soup.find_all("a", href=True):
+            href = a_tag["href"].lower()
+            if href.startswith("mailto:") and email_lower in href:
+                result["email_found_on_page"] = True
+                logger.debug("Email '%s' found in mailto link.", email)
+                return result
+
+        logger.debug("Email '%s' NOT found on page.", email)
+        return result
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PRIVATE HELPER: _find_person_on_page
+    # Searches for the lead's name in the scraped content.
+    # ──────────────────────────────────────────────────────────────────────────
+    def _find_person_on_page(
+        self, soup: BeautifulSoup, person_name: str, url: str
+    ) -> dict:
+        """
+        Searches the website for the lead's name to verify they are actually
+        associated with the business.
+
+        Search targets:
+            - Full page text
+            - Meta tags (author, description)
+            - Structured data (JSON-LD)
+            - Common subpages: /about, /team, /contact, /about-us, /our-team
+
+        Returns:
+            dict: {
+                "person_found_on_page": bool,
+                "person_context": str  (e.g., "Found on About page")
+            }
+        """
+        result = {
+            "person_found_on_page": False,
+            "person_context": "",
+        }
+
+        if not person_name or len(person_name.strip()) < 2:
+            return result
+
+        name_lower = person_name.lower().strip()
+        # Also check first name and last name separately if multi-word
+        name_parts = name_lower.split()
+
+        # ── Search main page text ─────────────────────────────────────────
+        page_text = soup.get_text(separator=" ", strip=True).lower()
+        if name_lower in page_text:
+            result["person_found_on_page"] = True
+            result["person_context"] = "Found on main page"
+            logger.debug("Person '%s' found on main page.", person_name)
+            return result
+
+        # ── Search meta tags ──────────────────────────────────────────────
+        for meta in soup.find_all("meta"):
+            content = (meta.get("content") or "").lower()
+            if name_lower in content:
+                result["person_found_on_page"] = True
+                result["person_context"] = "Found in meta tags"
+                logger.debug("Person '%s' found in meta tags.", person_name)
+                return result
+
+        # ── Search JSON-LD structured data ────────────────────────────────
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                ld_text = script.string or ""
+                if name_lower in ld_text.lower():
+                    result["person_found_on_page"] = True
+                    result["person_context"] = "Found in structured data"
+                    return result
+            except Exception:
+                pass
+
+        # ── Search common subpages ────────────────────────────────────────
+        subpages = ["/about", "/about-us", "/team", "/our-team", "/contact", "/staff"]
+        for subpage in subpages:
+            try:
+                sub_url = urljoin(url, subpage)
+                sub_resp = self.session.get(
+                    sub_url,
+                    headers=self._get_headers(),
+                    timeout=7,
+                    allow_redirects=True,
+                )
+                if sub_resp.status_code == 200:
+                    try:
+                        sub_soup = BeautifulSoup(sub_resp.text, "lxml")
+                    except Exception:
+                        sub_soup = BeautifulSoup(sub_resp.text, "html.parser")
+
+                    sub_text = sub_soup.get_text(separator=" ", strip=True).lower()
+                    if name_lower in sub_text:
+                        result["person_found_on_page"] = True
+                        result["person_context"] = f"Found on {subpage} page"
+                        logger.debug(
+                            "Person '%s' found on subpage: %s",
+                            person_name, sub_url,
+                        )
+                        return result
+            except Exception:
+                continue  # Subpage unreachable — skip silently
+
+        logger.debug("Person '%s' NOT found on website.", person_name)
+        return result
+
+    # ──────────────────────────────────────────────────────────────────────────
     # PRIVATE HELPER: _extract_title
     # Safely extracts the <title> text from a BeautifulSoup object.
     # ──────────────────────────────────────────────────────────────────────────
@@ -216,9 +451,10 @@ class WebScout:
     # PUBLIC METHOD: scrape_website
     # Core scraping unit. Self-healing with exponential-backoff retry logic.
     # ──────────────────────────────────────────────────────────────────────────
-    def scrape_website(self, url: str) -> dict:
+    def scrape_website(self, url: str, email: str = "", person_name: str = "") -> dict:
         """
-        Visits a single URL, extracts structured content, and returns a dict.
+        Visits a single URL, extracts structured content, and runs verification
+        checks against the lead's email and name.
 
         Self-Healing Behaviour (per custom_rules.md — Directive 4):
             - Network error / timeout → logs error, returns {"url", "error"}.
@@ -226,14 +462,42 @@ class WebScout:
             - Auto-retry             → up to MAX_RETRIES with exponential backoff.
             - Parsing failure        → logs warning, returns best-effort result.
 
+        Verification Signals (NEW):
+            - domain_alive:          Is the domain registered and reachable?
+            - email_found_on_page:   Does the CSV email appear on the website?
+            - email_domain_matches:  Does the email domain match the site domain?
+            - person_found_on_page:  Does the CSV person name appear on the website?
+            - person_context:        Where the person was found (if at all).
+
         Args:
-            url (str): A validated URL string (output of AGENT 1).
+            url         (str): A validated URL string (output of AGENT 1).
+            email       (str): The lead's email address for verification.
+            person_name (str): The lead's name for verification.
 
         Returns:
-            dict: Success → {"url", "title", "content"}
-                  Failure → {"url", "error"}
+            dict: Success → {"url", "title", "content", verification signals}
+                  Failure → {"url", "error", "domain_alive": False}
         """
-        logger.info("Scraping: %s", url)
+        logger.info("Scraping: %s (email=%s, person=%s)", url, email, person_name)
+
+        # ── PRE-FLIGHT: Domain Liveness Check ─────────────────────────────────
+        # Before wasting time on retries, verify the domain actually exists.
+        domain_alive = self._check_domain_alive(url)
+
+        if not domain_alive:
+            logger.error(
+                "✗ Domain is DEAD for %s — not registered or completely unreachable.",
+                url,
+            )
+            return {
+                "url":                  url,
+                "error":                "Domain not registered or unreachable (DNS failed)",
+                "domain_alive":         False,
+                "email_found_on_page":  False,
+                "email_domain_matches": False,
+                "person_found_on_page": False,
+                "person_context":       "",
+            }
 
         last_error: Optional[str] = None
 
@@ -275,17 +539,29 @@ class WebScout:
                 title   = self._extract_title(soup)
                 content = self._extract_paragraph_content(soup)
 
+                # ── VERIFICATION CHECKS ───────────────────────────────────────
+                email_result  = self._find_email_on_page(soup, email, url)
+                person_result = self._find_person_on_page(soup, person_name, url)
+
                 logger.info(
-                    "✓ Scraped: %s | Title: '%s' | Content: %d chars",
-                    url,
-                    title,
-                    len(content),
+                    "✓ Scraped: %s | Title: '%s' | Content: %d chars | "
+                    "Email on page: %s | Email domain match: %s | "
+                    "Person on page: %s",
+                    url, title, len(content),
+                    email_result["email_found_on_page"],
+                    email_result["email_domain_matches"],
+                    person_result["person_found_on_page"],
                 )
 
                 return {
-                    "url":     url,
-                    "title":   title,
-                    "content": content,
+                    "url":                  url,
+                    "title":                title,
+                    "content":              content,
+                    "domain_alive":         True,
+                    "email_found_on_page":  email_result["email_found_on_page"],
+                    "email_domain_matches": email_result["email_domain_matches"],
+                    "person_found_on_page": person_result["person_found_on_page"],
+                    "person_context":       person_result["person_context"],
                 }
 
             except requests.exceptions.Timeout:
@@ -325,20 +601,20 @@ class WebScout:
                 time.sleep(wait)
 
         # ── ALL RETRIES EXHAUSTED ─────────────────────────────────────────────
-        # Instead of returning an error dict (which causes downstream skipping),
-        # return a valid result with a fallback content string. This allows the
-        # lead to proceed to Agent 3, which will use deductive reasoning from
-        # the company name alone.
-        logger.error("✗ Scrape failed for %s after %d attempts. Last error: %s",
-                     url, MAX_RETRIES, last_error)
-        logger.info(
-            "Returning fallback context for %s — Agent 3 will infer from company name.",
-            url,
+        # Domain is alive (passed DNS check) but we couldn't scrape content.
+        # Return an error — Agent 3 will NOT get fake content to infer from.
+        logger.error(
+            "✗ Scrape failed for %s after %d attempts. Last error: %s",
+            url, MAX_RETRIES, last_error,
         )
         return {
-            "url":     url,
-            "title":   "Website unreachable",
-            "content": "Website blocked — using company name for inference",
+            "url":                  url,
+            "error":                f"Website unreachable after {MAX_RETRIES} attempts: {last_error}",
+            "domain_alive":         True,  # DNS resolved, but scrape failed
+            "email_found_on_page":  False,
+            "email_domain_matches": False,
+            "person_found_on_page": False,
+            "person_context":       "",
         }
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -376,12 +652,21 @@ class WebScout:
 
             logger.info("[%d/%d] Processing: %s | %s", index, total, lead_name, url)
 
-            scrape_result = self.scrape_website(url)
+            email       = lead.get("Email", "")
+            person_name = lead.get("Name", "")
+            scrape_result = self.scrape_website(url, email=email, person_name=person_name)
 
             # ── MERGE STRATEGY ────────────────────────────────────────────────
             # Prefix scraped keys to avoid collision with AGENT 1's field names
             # (e.g., lead already has a "url" key from AGENT 1 as "Website").
             enriched_lead = lead.copy()
+
+            # ── Merge verification signals ────────────────────────────────────
+            enriched_lead["domain_alive"]         = scrape_result.get("domain_alive", False)
+            enriched_lead["email_found_on_page"]  = scrape_result.get("email_found_on_page", False)
+            enriched_lead["email_domain_matches"] = scrape_result.get("email_domain_matches", False)
+            enriched_lead["person_found_on_page"] = scrape_result.get("person_found_on_page", False)
+            enriched_lead["person_context"]       = scrape_result.get("person_context", "")
 
             if "error" in scrape_result:
                 enriched_lead["scrape_error"]   = scrape_result["error"]

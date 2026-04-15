@@ -987,7 +987,7 @@ if qualify_clicked and api_keys:
                     unsafe_allow_html=True,
                 )
 
-            scraped_data = scout.scrape_website(url)
+            scraped_data = scout.scrape_website(url, email=lead.get("Email", ""), person_name=lead.get("Name", ""))
 
             if "error" in scraped_data:
                 lead["scrape_error"]    = scraped_data["error"]
@@ -1007,6 +1007,13 @@ if qualify_clicked and api_keys:
                         f'<div class="log-entry log-success">Scraped: {scraped_data.get("title", "N/A")}</div>',
                         unsafe_allow_html=True,
                     )
+
+            # ── Merge verification signals into lead dict ─────────────────────
+            lead["domain_alive"]         = scraped_data.get("domain_alive", False)
+            lead["email_found_on_page"]  = scraped_data.get("email_found_on_page", False)
+            lead["email_domain_matches"] = scraped_data.get("email_domain_matches", False)
+            lead["person_found_on_page"] = scraped_data.get("person_found_on_page", False)
+            lead["person_context"]       = scraped_data.get("person_context", "")
 
             # ── AGENT 3 — Phase 1: Qualify & Summarize ────────────────────────
             df.at[idx, "Status"] = "Qualifying..."

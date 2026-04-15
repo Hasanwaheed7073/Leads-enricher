@@ -545,17 +545,46 @@ class LeadBrain:
         # ── PRE-FLIGHT: Check for scrape errors ───────────────────────────────
         if scraped_data.get("scrape_error"):
             logger.warning(
-                "Lead '%s' has a scrape error: %s. "
-                "Proceeding with CSV-only context (lower score expected).",
+                "Lead '%s' has a scrape error: %s.",
                 lead_name,
                 scraped_data["scrape_error"],
             )
+
+        # ── PRE-AI HARD FILTERS ───────────────────────────────────────────────
+        # These checks run BEFORE making any AI calls, saving API quota on
+        # leads that are clearly invalid based on verifiable signals.
+
+        domain_alive         = scraped_data.get("domain_alive", True)
+        email_domain_matches = scraped_data.get("email_domain_matches", True)
+        email_found_on_page  = scraped_data.get("email_found_on_page", False)
+        person_found_on_page = scraped_data.get("person_found_on_page", False)
+        person_context       = scraped_data.get("person_context", "")
+
+        # HARD FILTER 1: Dead domain = instant disqualification.
+        # If the domain doesn't even exist, this is fake/stale data.
+        if not domain_alive:
+            logger.warning(
+                "HARD FILTER: '%s' — Domain is DEAD. Auto-disqualified.",
+                lead_name,
+            )
+            return {
+                "is_valid": False,
+                "score":    0,
+                "summary":  (
+                    f"DISQUALIFIED — Website domain is not registered or unreachable. "
+                    f"Cannot verify this is a real {target_industry} business."
+                ),
+            }
 
         # ── BUILD CLEAN CONTEXT ───────────────────────────────────────────────
         # Strip internal pipeline keys irrelevant to the AI.
         clean_lead = {
             k: v for k, v in lead_data.items()
-            if k not in ("scrape_error", "scraped_title", "scraped_content")
+            if k not in (
+                "scrape_error", "scraped_title", "scraped_content",
+                "domain_alive", "email_found_on_page", "email_domain_matches",
+                "person_found_on_page", "person_context",
+            )
             and v  # Drop empty/None fields to reduce token cost
         }
 
@@ -564,17 +593,28 @@ class LeadBrain:
             "page_content": scraped_data.get("scraped_content") or scraped_data.get("content", "N/A"),
         }
 
+        # ── VERIFICATION CONTEXT (passed to AI) ───────────────────────────────
+        verification_context = {
+            "domain_alive":           domain_alive,
+            "website_was_scrapeable": scraped_data.get("scrape_error") is None,
+            "email_found_on_page":    email_found_on_page,
+            "email_domain_matches":   email_domain_matches,
+            "person_found_on_page":   person_found_on_page,
+            "person_context":         person_context,
+        }
+
         # ── SYSTEM PROMPT ─────────────────────────────────────────────────────
         system_prompt = (
-            "You are an expert HVAC industry analyst. Your job is to determine "
-            "if a business is an HVAC contractor or closely related service provider. "
+            "You are an expert HVAC industry analyst and lead verification specialist. "
+            "Your job is to determine if a business is a REAL, ACTIVE HVAC contractor "
+            "with a working website. You must cross-reference ALL verification signals. "
+            "Do NOT qualify based on company name alone — you need real evidence. "
             "You ALWAYS respond with raw JSON only — no markdown, no code fences, no explanation."
         )
 
         # ── USER PROMPT ───────────────────────────────────────────────────────
-        # Multi-signal qualification: company name + website + email domain.
-        # Explicit scoring rubric prevents over-strict disqualification.
-        user_prompt = f"""Use ALL of the following signals to determine if this business is in the "{target_industry}" industry:
+        # Multi-signal qualification with strict verification requirements.
+        user_prompt = f"""Analyze ALL signals to determine if this lead is a REAL, VERIFIED business in the "{target_industry}" industry.
 
 Lead data:
 {json.dumps(clean_lead, indent=2)}
@@ -582,22 +622,42 @@ Lead data:
 Scraped website context:
 {json.dumps(clean_scraped, indent=2)}
 
-1. COMPANY NAME — Does it contain any of these words or their abbreviations: Heating, Cooling, Air, HVAC, Climate, Comfort, Ventilation, Refrigeration, Mechanical, Plumbing, AC, Heat, Furnace, Boiler, Duct, Indoor, Temperature, Energy, Service, Solutions, Systems, Home Services, Contracting?
-2. WEBSITE CONTENT — Does the scraped text mention installing, repairing, or maintaining heating systems, cooling systems, air conditioners, furnaces, heat pumps, boilers, ductwork, thermostats, ventilation, or air quality?
-3. EMAIL DOMAIN — Does the email domain reflect an HVAC-related company name?
+Verification signals:
+{json.dumps(verification_context, indent=2)}
 
-Scoring rules — return ONLY a valid JSON object, no explanation, no markdown:
-- Score 9-10: Company name AND website both clearly indicate HVAC
-- Score 7-8: Company name strongly suggests HVAC even if website is generic
-- Score 5-6: Website mentions HVAC-adjacent services (plumbing, home services, mechanical)
-- Score 3-4: Weak signals only — possible but uncertain
-- Score 1-2: Very unlikely to be HVAC
-- Score 0: Absolutely no connection to HVAC after checking all signals
+=== CRITICAL VERIFICATION RULES (FOLLOW STRICTLY) ===
 
-Return format strictly:
-{{"is_valid": true, "score": 8, "summary": "one sentence explaining why"}}
+1. WEBSITE MUST BE REAL:
+   - If website_was_scrapeable is false → the website could not be loaded. Maximum score: 2.
+   - If the page content is generic, parked, or "coming soon" → Maximum score: 3.
+   - Having an HVAC-sounding company name is NOT ENOUGH to qualify without a working website.
 
-Set is_valid to true if score is 4 or above. Never return score 0 unless all three signals show zero HVAC connection."""
+2. EMAIL MUST BE VERIFIABLE:
+   - If email_domain_matches is false AND email_found_on_page is false → the email is likely fake or from a purchased list. Penalize by -3 points.
+   - If the email uses a known dummy domain (example.com, test.com, etc.) → Maximum score: 1.
+   - If email domain matches the website domain → this is a positive signal.
+
+3. PERSON MUST BE FINDABLE:
+   - If person_found_on_page is false → the person named in the CSV was NOT found on the website. Penalize by -2 points.
+   - If person_found_on_page is true → this is a strong positive signal.
+
+4. WEBSITE CONTENT MUST CONFIRM INDUSTRY:
+   - The page content must mention HVAC-related services: heating, cooling, AC, furnace, etc.
+   - Generic "home services" without specific HVAC mentions → Score 3-4 maximum.
+   - Clear HVAC content with service descriptions → Score 7-10.
+
+=== SCORING RUBRIC ===
+- Score 9-10: Working website with clear HVAC content + email domain matches + person found on site
+- Score 7-8: Working website with clear HVAC content but email/person not fully verified
+- Score 5-6: Working website with HVAC-adjacent content (plumbing, home services)
+- Score 3-4: Working website but weak/generic content, or significant verification failures
+- Score 1-2: Website doesn't work OR email is clearly fake
+- Score 0: Domain is dead, email is dummy, no real signals
+
+Set is_valid to true ONLY if score is 5 or above (stricter threshold).
+
+Return ONLY a raw JSON object:
+{{"is_valid": true, "score": 8, "summary": "one sentence explaining the score, mentioning which checks passed/failed"}}"""
 
         # ── CALL AI WITH KEY ROTATION ─────────────────────────────────────────
         result = self._call_with_rotation(
@@ -627,16 +687,48 @@ Set is_valid to true if score is 4 or above. Never return score 0 unless all thr
             score = 0
 
         # ── GUARD: Flag unverifiable scores ────────────────────────────────
-        # If the AI returned null, None, 0, empty string, or a non-castable
-        # value, the score is unreliable. Instead of silently leaving it as
-        # 0 (which looks like a real but low score), flag it as "Unverified"
-        # so the UI and downstream logic can distinguish real zeros from
-        # API failures that need manual review.
         if score == 0:
             score = "Unverified"
             summary = "Could not be verified — manual review needed."
         else:
             summary = str(result.get("summary", "Error.")).strip() or "Error."
+
+        # ── POST-AI SCORE CEILING ENFORCEMENT ─────────────────────────────────
+        # Even if the AI over-scores, hard caps prevent false positives.
+        if isinstance(score, int):
+
+            # CAP 1: Website content was not scrapeable → max 2
+            if scraped_data.get("scrape_error") is not None:
+                if score > 2:
+                    logger.warning(
+                        "SCORE CAP: '%s' capped from %d to 2 — website was not scrapeable.",
+                        lead_name, score,
+                    )
+                    score = 2
+                    summary += " [Capped: website not scrapeable]"
+
+            # CAP 2: Email doesn't match AND not on page → max 4
+            if not email_domain_matches and not email_found_on_page:
+                if score > 4:
+                    logger.warning(
+                        "SCORE CAP: '%s' capped from %d to 4 — email not verified.",
+                        lead_name, score,
+                    )
+                    score = 4
+                    summary += " [Capped: email unverified]"
+
+            # CAP 3: Person not found on website → max 6
+            if not person_found_on_page:
+                if score > 6:
+                    logger.warning(
+                        "SCORE CAP: '%s' capped from %d to 6 — person not found on website.",
+                        lead_name, score,
+                    )
+                    score = 6
+                    summary += " [Capped: person not on website]"
+
+            # Enforce is_valid based on final capped score
+            is_valid = score >= 5
 
         logger.info(
             "✓ Phase 1 → %s | Valid: %s | Score: %s/10 | Summary: %.80s...",
