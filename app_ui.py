@@ -442,8 +442,8 @@ with st.sidebar:
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SESSION STATE — Persistent across Streamlit reruns.
-# This is the backbone of the two-step workflow. Phase 2 only renders
-# after Phase 1 sets `phase1_done = True`.
+# This is the backbone of the workflow. The DataFrame must be cached here so
+# it isn't destroyed when the user interacts with the UI.
 # ──────────────────────────────────────────────────────────────────────────────
 if "qualified_leads" not in st.session_state:
     st.session_state.qualified_leads = []
@@ -452,6 +452,13 @@ if "phase1_done" not in st.session_state:
 if "phase2_done" not in st.session_state:
     st.session_state.phase2_done = False
 
+# New caching variables
+if "master_df" not in st.session_state:
+    st.session_state.master_df = None
+if "validated_leads" not in st.session_state:
+    st.session_state.validated_leads = []
+if "current_file_id" not in st.session_state:
+    st.session_state.current_file_id = None
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SETTINGS STATE — Persist settings across nav pages so they survive reruns.
@@ -856,38 +863,63 @@ and more. Go to <strong>Settings</strong> to configure your AI provider.
 # STATE: CSV Uploaded — Process and Display
 # ──────────────────────────────────────────────────────────────────────────────
 
-# ── AGENT 1: Ingest the uploaded CSV via a temp file ──────────────────────────
-import tempfile
-import os
+# ── CACHING LOGIC ─────────────────────────────────────────────────────────────
+# Only re-ingest and build a fresh DataFrame if the file has changed.
+if st.session_state.current_file_id != uploaded_file.file_id:
+    # ── AGENT 1: Ingest the uploaded CSV via a temp file ──────────────────────
+    import tempfile
+    import os
 
-temp_dir = tempfile.mkdtemp()
-temp_csv_path = os.path.join(temp_dir, "uploaded_leads.csv")
+    temp_dir = tempfile.mkdtemp()
+    temp_csv_path = os.path.join(temp_dir, "uploaded_leads.csv")
 
-with open(temp_csv_path, "wb") as f:
-    f.write(uploaded_file.getvalue())
+    with open(temp_csv_path, "wb") as f:
+        f.write(uploaded_file.getvalue())
 
-ingestor = LeadIngestor()
-validated_leads = ingestor.ingest_csv(temp_csv_path)
+    ingestor = LeadIngestor()
+    validated_leads = ingestor.ingest_csv(temp_csv_path)
 
-if not validated_leads:
-    with metrics_placeholder.container():
-        render_metric_cards(total=0, processed=0, avg_score=0.0, status="error")
-    st.error(
-        "Agent 1 returned zero valid leads. "
-        "Ensure your CSV has a 'Website' column with valid URLs (http/https)."
-    )
-    st.stop()
+    # Cleanup temp file
+    try:
+        os.remove(temp_csv_path)
+        os.rmdir(temp_dir)
+    except OSError:
+        pass
 
+    if not validated_leads:
+        with metrics_placeholder.container():
+            render_metric_cards(total=0, processed=0, avg_score=0.0, status="error")
+        st.error(
+            "Agent 1 returned zero valid leads. "
+            "Ensure your CSV has a 'Website' column with valid URLs (http/https)."
+        )
+        st.stop()
+
+    # ── Build the fresh working DataFrame ─────────────────────────────────────
+    df = pd.DataFrame(validated_leads)
+    df["Lead_Score"] = ""
+    df["Valid"]      = ""
+    df["Summary"]    = ""
+    df["Pitch"]      = ""
+    df["Status"]     = "Pending"
+
+    # Push to session state
+    st.session_state.master_df = df
+    st.session_state.validated_leads = validated_leads
+    st.session_state.current_file_id = uploaded_file.file_id
+    
+    # Reset phase states since it's a new file
+    st.session_state.phase1_done = False
+    st.session_state.phase2_done = False
+    st.session_state.qualified_leads = []
+
+else:
+    # ── Load from Cache ───────────────────────────────────────────────────────
+    df = st.session_state.master_df
+    validated_leads = st.session_state.validated_leads
+
+# ── Dynamic totals ────────────────────────────────────────────────────────────
 total_leads = len(validated_leads)
-
-# ── Build the working DataFrame ──────────────────────────────────────────────
-df = pd.DataFrame(validated_leads)
-df["Lead_Score"] = ""
-df["Valid"]      = ""
-df["Summary"]    = ""
-df["Pitch"]      = ""
-df["Status"]     = "Pending"
-
 # ── Display columns for each phase ───────────────────────────────────────────
 phase1_columns = [
     col for col in ["Name", "Email", "Company", "Website", "Valid", "Lead_Score", "Summary", "Status"]
@@ -1076,10 +1108,10 @@ if qualify_clicked and api_keys:
                     )
 
         except Exception as e:
-            df.at[idx, "Lead_Score"] = str(0)
-            df.at[idx, "Valid"]      = "Error"
-            df.at[idx, "Summary"]    = "Error — see log"
-            df.at[idx, "Status"]     = "Failed"
+            st.session_state.master_df.at[idx, "Lead_Score"] = str(0)
+            st.session_state.master_df.at[idx, "Valid"]      = "Error"
+            st.session_state.master_df.at[idx, "Summary"]    = "Error — see log"
+            st.session_state.master_df.at[idx, "Status"]     = "Failed"
             failed_count += 1
 
             with log_container:
@@ -1093,7 +1125,7 @@ if qualify_clicked and api_keys:
         current_avg = total_score / qualified_count if qualified_count > 0 else 0.0
 
         with table_placeholder.container():
-            st.dataframe(df[phase1_columns], use_container_width=True,
+            st.dataframe(st.session_state.master_df[phase1_columns], use_container_width=True,
                          height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
         with metrics_placeholder.container():
@@ -1132,11 +1164,11 @@ Duration: <b>{elapsed_str}</b>
     # ── Persist qualified leads to session state ──────────────────────────────
     st.session_state.qualified_leads = qualified_leads_list
     st.session_state.phase1_done     = True
-    st.session_state.phase1_df       = df.copy()  # Preserve the P1 dataframe state
+    st.session_state.phase1_df       = st.session_state.master_df.copy()  # Preserve the P1 dataframe snapshot
     st.session_state.phase2_done     = False       # Reset P2 on new P1 run
 
     # ── Download checkpoint: Qualified Leads CSV ──────────────────────────────
-    qualified_df = df[df["Valid"] == "Yes"][phase1_columns].copy()
+    qualified_df = st.session_state.master_df[st.session_state.master_df["Valid"] == "Yes"][phase1_columns].copy()
     csv_bytes_p1 = convert_df_to_csv(qualified_df)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1154,11 +1186,3 @@ Duration: <b>{elapsed_str}</b>
     )
 
     st.info("Phase 1 done! Head to **Leads Table** to view results and generate pitches.")
-
-
-# ── Cleanup temp file ─────────────────────────────────────────────────────────
-try:
-    os.remove(temp_csv_path)
-    os.rmdir(temp_dir)
-except OSError:
-    pass
