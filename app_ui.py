@@ -73,23 +73,23 @@ st.markdown("""
 
     /* ── Main background ─────────────────────────────────────────────────── */
     .stApp {
-        background: #f5f7fa !important;
+        background: #040914 !important;
     }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────── */
     section[data-testid="stSidebar"] {
-        background: #ffffff !important;
-        border-right: 1px solid #e8ecf0 !important;
+        background: #0b0f19 !important;
+        border-right: 1px solid #1e293b !important;
     }
     section[data-testid="stSidebar"] .stMarkdown h1,
     section[data-testid="stSidebar"] .stMarkdown h2,
     section[data-testid="stSidebar"] .stMarkdown h3 {
-        color: #0a1628 !important;
+        color: #ffffff !important;
     }
     section[data-testid="stSidebar"] .stMarkdown p,
     section[data-testid="stSidebar"] .stMarkdown span,
     section[data-testid="stSidebar"] .stMarkdown label {
-        color: #4b5563 !important;
+        color: #cbd5e1 !important;
     }
 
     /* ── Sidebar radio nav styling ───────────────────────────────────────── */
@@ -101,30 +101,30 @@ st.markdown("""
         border-radius: 8px !important;
         margin-bottom: 2px !important;
         font-weight: 500 !important;
-        color: #6b7280 !important;
+        color: #94a3b8 !important;
         transition: all 0.2s ease !important;
         cursor: pointer !important;
     }
     section[data-testid="stSidebar"] .stRadio > div > label:hover {
         background: #f0f4f8 !important;
-        color: #0a1628 !important;
+        color: #ffffff !important;
     }
     section[data-testid="stSidebar"] .stRadio > div > label[data-checked="true"],
     section[data-testid="stSidebar"] .stRadio > div > label:has(input:checked) {
-        background: #eef2f7 !important;
-        color: #0a1628 !important;
+        background: #1e293b !important;
+        color: #ffffff !important;
         font-weight: 600 !important;
     }
 
     /* ── All headings ────────────────────────────────────────────────────── */
     h1, h2, h3, h4, h5, h6 {
-        color: #0a1628 !important;
+        color: #ffffff !important;
         font-weight: 700 !important;
     }
 
     /* ── Body text ───────────────────────────────────────────────────────── */
     .stMarkdown p, .stMarkdown li, .stMarkdown span {
-        color: #374151 !important;
+        color: #e2e8f0 !important;
     }
 
     /* ── Form and Widget Labels ──────────────────────────────────────────── */
@@ -137,24 +137,24 @@ st.markdown("""
     .stSelectbox label span,
     .stSlider label p,
     .stSlider label span {
-        color: #4b5563 !important;
+        color: #cbd5e1 !important;
         font-weight: 500 !important;
     }
 
     /* ── Metric cards (st.metric overrides) ──────────────────────────────── */
     [data-testid="stMetric"],
     [data-testid="metric-container"] {
-        background: #ffffff !important;
+        background: #0b0f19 !important;
         border-radius: 12px !important;
         box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
         padding: 20px !important;
-        border: 1px solid #e8ecf0 !important;
+        border: 1px solid #1e293b !important;
     }
     [data-testid="stMetricLabel"] {
-        color: #6b7280 !important;
+        color: #94a3b8 !important;
     }
     [data-testid="stMetricValue"] {
-        color: #0a1628 !important;
+        color: #ffffff !important;
         font-weight: 700 !important;
     }
 
@@ -166,8 +166,8 @@ st.markdown("""
     }
     .metric-card {
         flex: 1;
-        background: #ffffff;
-        border: 1px solid #e8ecf0;
+        background: #0b0f19;
+        border: 1px solid #1e293b;
         border-radius: 12px;
         padding: 20px;
         text-align: center;
@@ -181,10 +181,10 @@ st.markdown("""
     .metric-value {
         font-size: 2rem;
         font-weight: 700;
-        color: #0a1628;
+        color: #ffffff;
     }
     .metric-label {
-        color: #6b7280;
+        color: #94a3b8;
         font-size: 0.8rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
@@ -217,17 +217,17 @@ st.markdown("""
     .section-header {
         font-size: 1.1rem;
         font-weight: 700;
-        color: #0a1628;
+        color: #ffffff;
         margin: 1.5rem 0 0.75rem 0;
         padding-bottom: 0.5rem;
-        border-bottom: 1px solid #e8ecf0;
+        border-bottom: 1px solid #1e293b;
         letter-spacing: -0.01em;
     }
 
     /* ── White card wrapper ──────────────────────────────────────────────── */
     .ui-card {
-        background: #ffffff;
-        border: 1px solid #e8ecf0;
+        background: #0b0f19;
+        border: 1px solid #1e293b;
         border-radius: 12px;
         padding: 24px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.06);
@@ -236,31 +236,31 @@ st.markdown("""
     .ui-card-header {
         font-size: 1.15rem;
         font-weight: 700;
-        color: #0a1628;
+        color: #ffffff;
         margin: 0 0 1rem 0;
         padding-bottom: 0.75rem;
-        border-bottom: 1px solid #e8ecf0;
+        border-bottom: 1px solid #1e293b;
     }
 
     /* ── Dataframe styling ───────────────────────────────────────────────── */
     .stDataFrame, [data-testid="stDataFrame"] {
         border-radius: 12px;
         overflow: hidden;
-        border: 1px solid #e8ecf0;
-        background: #ffffff;
+        border: 1px solid #1e293b;
+        background: #0b0f19;
     }
     /* Header row */
     .stDataFrame [data-testid="stDataFrameResizable"] thead tr th,
     .stDataFrame thead tr th,
     [data-testid="stDataFrame"] thead tr th {
-        background: #0a1628 !important;
-        color: #ffffff !important;
+        background: #ffffff !important;
+        color: #0b0f19 !important;
         font-weight: 600 !important;
     }
 
     /* ── Buttons ─────────────────────────────────────────────────────────── */
     .stButton > button {
-        background: #0a1628 !important;
+        background: #ffffff !important;
         color: white !important;
         border: none !important;
         border-radius: 8px !important;
@@ -279,7 +279,7 @@ st.markdown("""
 
     /* ── Download button ─────────────────────────────────────────────────── */
     .stDownloadButton > button {
-        background: #0a1628 !important;
+        background: #ffffff !important;
         color: white !important;
         border: none !important;
         border-radius: 8px !important;
@@ -292,32 +292,32 @@ st.markdown("""
 
     /* ── Progress bar ────────────────────────────────────────────────────── */
     .stProgress > div > div {
-        background: linear-gradient(90deg, #0a1628 0%, #1e3a5f 50%, #2563eb 100%) !important;
+        background: linear-gradient(90deg, #ffffff 0%, #1e3a5f 50%, #2563eb 100%) !important;
         border-radius: 999px;
     }
 
     /* ── Input fields ────────────────────────────────────────────────────── */
     .stTextInput input, .stSelectbox select {
-        background: #ffffff !important;
-        border: 1px solid #d1d5db !important;
+        background: #0b0f19 !important;
+        border: 1px solid #334155 !important;
         border-radius: 8px !important;
-        color: #1f2937 !important;
+        color: #f8fafc !important;
     }
     .stTextInput input:focus {
-        border-color: #0a1628 !important;
+        border-color: #ffffff !important;
         box-shadow: 0 0 0 3px rgba(10,22,40,0.08) !important;
     }
 
     /* ── File uploader ───────────────────────────────────────────────────── */
     [data-testid="stFileUploader"] {
-        border: 2px dashed #c7cdd4 !important;
+        border: 2px dashed #475569 !important;
         border-radius: 12px !important;
         padding: 1rem !important;
-        background: #ffffff !important;
+        background: #0b0f19 !important;
         transition: border-color 0.3s ease;
     }
     [data-testid="stFileUploader"]:hover {
-        border-color: #0a1628 !important;
+        border-color: #ffffff !important;
     }
 
     /* ── Log container ───────────────────────────────────────────────────── */
@@ -325,7 +325,7 @@ st.markdown("""
         font-family: 'JetBrains Mono', 'Fira Code', monospace !important;
         font-size: 0.78rem;
         padding: 0.3rem 0;
-        color: #6b7280;
+        color: #94a3b8;
         border-bottom: 1px solid #f0f0f0;
     }
     .log-success { color: #16a34a; }
@@ -345,12 +345,12 @@ st.markdown("""
     .stSlider [data-testid="stThumbValue"],
     .stSlider [data-testid="stTickBarMin"],
     .stSlider [data-testid="stTickBarMax"] {
-        color: #374151 !important;
+        color: #e2e8f0 !important;
     }
 
     /* ── Radio group label visibility ───────────────────────────────────── */
     div[role='radiogroup'] label {
-        color: #0a1628 !important;
+        color: #ffffff !important;
         font-weight: 500 !important;
         font-size: 0.95rem !important;
     }
@@ -358,7 +358,50 @@ st.markdown("""
     /* ── Hide default Streamlit elements ──────────────────────────────────── */
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
-    header[data-testid="stHeader"] { background: #f5f7fa !important; }
+    header[data-testid="stHeader"] { background: #040914 !important; }
+
+    /* Premium Glassmorphism UI */
+    .ui-card {
+        background: rgba(11, 15, 25, 0.6) !important;
+        backdrop-filter: blur(12px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
+    }
+    
+    [data-testid="stMetric"], [data-testid="metric-container"] {
+        background: rgba(11, 15, 25, 0.6) !important;
+        backdrop-filter: blur(12px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
+    }
+    
+    section[data-testid="stSidebar"] {
+        background: rgba(4, 9, 20, 0.8) !important;
+        backdrop-filter: blur(16px) !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+    }
+    
+    /* Center the uploader text explicitly */
+    [data-testid="stFileUploader"] {
+        align-items: center;
+        text-align: center;
+        border: 2px dashed rgba(255, 255, 255, 0.15) !important;
+        background: rgba(0, 0, 0, 0.2) !important;
+    }
+    [data-testid="stFileUploaderDropzone"] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+    [data-testid="stFileUploaderDropzone"] > div {
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -413,8 +456,8 @@ with st.sidebar:
     # ── Logo / Brand ──────────────────────────────────────────────────────────
     st.markdown("""
     <div style="text-align: center; padding: 1.25rem 0 0.5rem 0;">
-        <h2 style="margin: 0.3rem 0 0 0; font-weight: 800; color: #0a1628;">Lead Sniper AI</h2>
-        <p style="color: #6b7280; font-size: 0.82rem; margin-top: 0.2rem; font-weight: 400;">
+        <h2 style="margin: 0.3rem 0 0 0; font-weight: 800; color: #ffffff;">Lead Sniper AI</h2>
+        <p style="color: #94a3b8; font-size: 0.82rem; margin-top: 0.2rem; font-weight: 400;">
             Autonomous Lead Research Engine
         </p>
     </div>
@@ -512,13 +555,13 @@ COLUMN_CONFIG = {
 #   SETTINGS PAGE
 # ══════════════════════════════════════════════════════════════════════════════
 if nav_selection == "⚙️ Settings":
-    st.markdown('<h2 style="color: #0a1628; font-weight: 700; margin-bottom: 0.25rem;">Settings</h2>', unsafe_allow_html=True)
-    st.markdown('<p style="color: #6b7280; margin-bottom: 1.5rem;">Configure your AI provider, target industry, and pipeline settings.</p>', unsafe_allow_html=True)
+    st.markdown('<h2 style="color: #ffffff; font-weight: 700; margin-bottom: 0.25rem;">Settings</h2>', unsafe_allow_html=True)
+    st.markdown('<p style="color: #94a3b8; margin-bottom: 1.5rem;">Configure your AI provider, target industry, and pipeline settings.</p>', unsafe_allow_html=True)
 
     # ── AI Provider Configuration Card ────────────────────────────────────────
     st.markdown('<div class="ui-card"><div class="ui-card-header">AI Provider Configuration</div>', unsafe_allow_html=True)
 
-    st.markdown("<p style='color: #4b5563; font-weight: 500; font-size: 0.95rem; margin-bottom: 0.5rem;'>API Keys (for rotation)</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #cbd5e1; font-weight: 500; font-size: 0.95rem; margin-bottom: 0.5rem;'>API Keys (for rotation)</p>", unsafe_allow_html=True)
     
     for i in range(len(st.session_state.api_keys_list)):
         col_input, col_del = st.columns([10, 1])
@@ -603,7 +646,7 @@ if nav_selection == "⚙️ Settings":
     if api_keys_parsed:
         st.markdown(
             f'<div class="ui-card" style="padding: 14px 20px;">'
-            f'<span style="color: #0a1628; font-size: 0.85rem; font-weight: 500;">'
+            f'<span style="color: #ffffff; font-size: 0.85rem; font-weight: 500;">'
             f'{len(api_keys_parsed)} API key{"s" if len(api_keys_parsed) > 1 else ""} loaded for rotation</span></div>',
             unsafe_allow_html=True,
         )
@@ -627,8 +670,8 @@ delay_seconds = st.session_state.delay_seconds
 #   LEADS TABLE PAGE
 # ══════════════════════════════════════════════════════════════════════════════
 if nav_selection == "📋 Leads Table":
-    st.markdown('<h2 style="color: #0a1628; font-weight: 700; margin-bottom: 0.25rem;">Leads Table</h2>', unsafe_allow_html=True)
-    st.markdown('<p style="color: #6b7280; margin-bottom: 1.5rem;">View historically verified leads from the database and generate personalized pitches.</p>', unsafe_allow_html=True)
+    st.markdown('<h2 style="color: #ffffff; font-weight: 700; margin-bottom: 0.25rem;">Leads Table</h2>', unsafe_allow_html=True)
+    st.markdown('<p style="color: #94a3b8; margin-bottom: 1.5rem;">View historically verified leads from the database and generate personalized pitches.</p>', unsafe_allow_html=True)
 
     # ── 1. Historical Leads Database Viewer ───────────────────────────────────
     st.markdown('<div class="section-header">Historical Database</div>', unsafe_allow_html=True)
@@ -693,7 +736,7 @@ if nav_selection == "📋 Leads Table":
     qualified_count_p2 = len(st.session_state.qualified_leads)
 
     st.markdown(f"""<div class="ui-card" style="padding: 16px 20px;">
-<p style="color: #374151; margin: 0; font-size: 0.9rem;">
+<p style="color: #e2e8f0; margin: 0; font-size: 0.9rem;">
 <b>{qualified_count_p2}</b> qualified leads are ready for pitch generation.
 This will make <b>{qualified_count_p2}</b> additional AI calls.
 </p>
@@ -799,7 +842,7 @@ This will make <b>{qualified_count_p2}</b> additional AI calls.
 
         st.markdown(f"""<div class="pipeline-toast">
 <h3 style="color: #16a34a; margin: 0 0 0.5rem 0; font-size: 1.1rem;">Phase 2 Complete — Pitches Generated</h3>
-<p style="color: #6b7280; margin: 0; font-size: 0.9rem;">
+<p style="color: #94a3b8; margin: 0; font-size: 0.9rem;">
 <b>{p2_success}</b> pitches generated • <b>{p2_failed}</b> failed •
 Duration: <b>{elapsed_str_p2}</b>
 </p>
@@ -834,11 +877,11 @@ Duration: <b>{elapsed_str_p2}</b>
 
 # ── Hero Header ───────────────────────────────────────────────────────────────
 st.markdown("""
-<div style="background: #ffffff; border: 1px solid #e8ecf0; border-radius: 16px;
+<div style="background: #0b0f19; border: 1px solid #1e293b; border-radius: 16px;
             padding: 2rem 2.5rem; margin-bottom: 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
-    <h1 style="font-size: 2.25rem; font-weight: 800; color: #0a1628;
+    <h1 style="font-size: 2.25rem; font-weight: 800; color: #ffffff;
                margin: 0; letter-spacing: -0.03em;">Lead Sniper AI</h1>
-    <p style="color: #6b7280; font-size: 1.05rem; margin-top: 0.3rem; font-weight: 400;">
+    <p style="color: #94a3b8; font-size: 1.05rem; margin-top: 0.3rem; font-weight: 400;">
         Upload leads → Scrape websites → AI scores & pitches → Export enriched CSV.
         All in real-time, row by row.
     </p>
@@ -874,12 +917,12 @@ if not uploaded_file:
         render_metric_cards(total=0, processed=0, avg_score=0.0, status="idle")
 
     st.markdown("""<div class="ui-card" style="text-align: center; padding: 3rem 2rem;">
-<h3 style="color: #6b7280; font-weight: 600; margin: 1rem 0 0.5rem 0;">Upload your leads CSV to get started</h3>
+<h3 style="color: #94a3b8; font-weight: 600; margin: 1rem 0 0.5rem 0;">Upload your leads CSV to get started</h3>
 <p style="color: #9ca3af; font-size: 0.9rem; max-width: 500px; margin: 0 auto;">
-Expected columns: <code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Name</code>,
-<code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Email</code>,
-<code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Company</code>,
-<code style="color: #0a1628; background: #eef2f7; padding: 2px 6px; border-radius: 4px;">Website</code>,
+Expected columns: <code style="color: #ffffff; background: #1e293b; padding: 2px 6px; border-radius: 4px;">Name</code>,
+<code style="color: #ffffff; background: #1e293b; padding: 2px 6px; border-radius: 4px;">Email</code>,
+<code style="color: #ffffff; background: #1e293b; padding: 2px 6px; border-radius: 4px;">Company</code>,
+<code style="color: #ffffff; background: #1e293b; padding: 2px 6px; border-radius: 4px;">Website</code>,
 and more. Go to <strong>Settings</strong> to configure your AI provider.
 </p>
 </div>""", unsafe_allow_html=True)
@@ -1234,7 +1277,7 @@ if (qualify_clicked or continue_clicked) and api_keys:
 
     st.markdown(f"""<div class="pipeline-toast">
 <h3 style="color: #16a34a; margin: 0 0 0.5rem 0; font-size: 1.1rem;">Phase 1 Complete — Qualification Results</h3>
-<p style="color: #6b7280; margin: 0; font-size: 0.9rem;">
+<p style="color: #94a3b8; margin: 0; font-size: 0.9rem;">
 <b>{qualified_count}</b> qualified • <b>{disqualified_count}</b> disqualified •
 <b>{failed_count}</b> failed •
 Avg Score: <b>{final_avg:.1f}/10</b> •
