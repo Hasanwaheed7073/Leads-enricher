@@ -465,6 +465,8 @@ if "current_file_id" not in st.session_state:
 # ──────────────────────────────────────────────────────────────────────────────
 if "api_keys_raw" not in st.session_state:
     st.session_state.api_keys_raw = ""
+if "api_keys_list" not in st.session_state:
+    st.session_state.api_keys_list = [""]
 if "selected_provider" not in st.session_state:
     st.session_state.selected_provider = "Grok (x.ai)"
 if "api_base_url" not in st.session_state:
@@ -515,13 +517,32 @@ if nav_selection == "⚙️ Settings":
     # ── AI Provider Configuration Card ────────────────────────────────────────
     st.markdown('<div class="ui-card"><div class="ui-card-header">AI Provider Configuration</div>', unsafe_allow_html=True)
 
-    st.session_state.api_keys_raw = st.text_input(
-        "API Keys (comma-separated for rotation)",
-        value=st.session_state.api_keys_raw,
-        type="password",
-        placeholder="key1, key2, key3",
-        help="Enter one or more API keys separated by commas. The engine will auto-rotate on 429 rate limits.",
-    )
+    st.markdown("<p style='color: #4b5563; font-weight: 500; font-size: 0.95rem; margin-bottom: 0.5rem;'>API Keys (for rotation)</p>", unsafe_allow_html=True)
+    
+    for i in range(len(st.session_state.api_keys_list)):
+        col_input, col_del = st.columns([10, 1])
+        with col_input:
+            st.session_state.api_keys_list[i] = st.text_input(
+                f"API Key {i+1}",
+                value=st.session_state.api_keys_list[i],
+                type="password",
+                key=f"api_key_input_{i}",
+                placeholder=f"Enter API Key {i+1}",
+                label_visibility="collapsed"
+            )
+        with col_del:
+            if len(st.session_state.api_keys_list) > 1:
+                # Add margin to align the button with input
+                st.markdown("<div style='margin-top: 2px;'></div>", unsafe_allow_html=True)
+                if st.button("✖", key=f"del_key_{i}", help="Remove this key"):
+                    st.session_state.api_keys_list.pop(i)
+                    st.rerun()
+
+    if st.button("➕ Add another API key", help="Add another key for rate-limit rotation"):
+        st.session_state.api_keys_list.append("")
+        st.rerun()
+        
+    st.session_state.api_keys_raw = ",".join([k.strip() for k in st.session_state.api_keys_list if k.strip()])
 
     st.session_state.selected_provider = st.selectbox(
         "Provider Preset",
