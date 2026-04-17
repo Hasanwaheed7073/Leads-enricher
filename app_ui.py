@@ -67,11 +67,8 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
     /* ── Global overrides ────────────────────────────────────────────────── */
-    html, body, [class*="st-"]:not(.material-symbols-rounded):not([class*="icon"]):not(svg) {
+    .stApp {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-    }
-    .material-symbols-rounded, [class*="icon"] {
-        font-family: 'Material Symbols Rounded' !important;
     }
 
     /* ── Main background ─────────────────────────────────────────────────── */
@@ -313,11 +310,34 @@ st.markdown("""
 
     /* ── File uploader ───────────────────────────────────────────────────── */
     [data-testid="stFileUploader"] {
-        border: 2px dashed #475569 !important;
-        border-radius: 12px !important;
-        padding: 1rem !important;
+        border: none !important;
+        padding: 0 !important;
+        background: transparent !important;
+    }
+    [data-testid="stFileUploaderDropzone"] {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        border: 2px dashed rgba(255, 255, 255, 0.15) !important;
+        background: rgba(0, 0, 0, 0.2) !important;
+        border-radius: 12px;
+        padding: 2rem !important;
+    }
+    [data-testid="stFileUploaderDropzone"] > div {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    [data-testid="stFileUploaderDropzone"] svg {
+        display: none !important;
+    }
+    [data-testid="stFileUploaderDropzone"] button {
         background: #0b0f19 !important;
-        transition: border-color 0.3s ease;
+        color: #ffffff !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        border-radius: 8px !important;
     }
     [data-testid="stFileUploader"]:hover {
         border-color: #ffffff !important;
