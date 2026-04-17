@@ -101,6 +101,7 @@ FALLBACK_QUALIFY = {
     "is_valid": False,
     "score":    0,
     "summary":  "Error.",
+    "category": "Unknown",
 }
 
 FALLBACK_PITCH = {
@@ -655,9 +656,10 @@ Verification signals:
 - Score 0: Domain is dead, email is dummy, no real signals
 
 Set is_valid to true ONLY if score is 5 or above (stricter threshold).
+Also, based on the specific services mentioned (e.g., Commercial, Residential, Plumbing, Roofing), determine a short, 1-3 word "category" for this lead.
 
 Return ONLY a raw JSON object:
-{{"is_valid": true, "score": 8, "summary": "one sentence explaining the score, mentioning which checks passed/failed"}}"""
+{{"is_valid": true, "score": 8, "summary": "one sentence explaining the score, mentioning which checks passed/failed", "category": "Commercial HVAC"}}"""
 
         # ── CALL AI WITH KEY ROTATION ─────────────────────────────────────────
         result = self._call_with_rotation(
@@ -730,12 +732,14 @@ Return ONLY a raw JSON object:
             # Enforce is_valid based on final capped score
             is_valid = score >= 5
 
+        category = str(result.get("category", "Unknown")).strip() or "Unknown"
+
         logger.info(
-            "✓ Phase 1 → %s | Valid: %s | Score: %s/10 | Summary: %.80s...",
-            lead_name, is_valid, score, summary,
+            "✓ Phase 1 → %s | Valid: %s | Score: %s/10 | Category: %s | Summary: %.80s...",
+            lead_name, is_valid, score, category, summary,
         )
 
-        return {"is_valid": is_valid, "score": score, "summary": summary}
+        return {"is_valid": is_valid, "score": score, "summary": summary, "category": category}
 
     # ══════════════════════════════════════════════════════════════════════════
     #   PHASE 2: GENERATE PITCH

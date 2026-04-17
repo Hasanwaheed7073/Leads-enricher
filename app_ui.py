@@ -496,6 +496,7 @@ provider_presets = {
 # ──────────────────────────────────────────────────────────────────────────────
 COLUMN_CONFIG = {
     "Lead_Score": st.column_config.TextColumn("Score", help="AI-generated lead score (1–10)"),
+    "Category":   st.column_config.TextColumn("Category", help="AI-determined industry category", width="medium"),
     "Summary":    st.column_config.TextColumn("Summary", help="AI-generated business summary", width="large"),
     "Pitch":      st.column_config.TextColumn("Pitch", help="Personalized outreach email", width="large"),
     "Status":     st.column_config.TextColumn("Status", width="small"),
@@ -621,11 +622,11 @@ Head to the <strong>Dashboard</strong> to upload a CSV and run Phase 1 qualifica
     df = st.session_state.phase1_df.copy()
 
     phase1_columns = [
-        col for col in ["Name", "Email", "Company", "Website", "Valid", "Lead_Score", "Summary", "Status"]
+        col for col in ["Name", "Email", "Company", "Website", "Valid", "Lead_Score", "Category", "Summary", "Status"]
         if col in df.columns
     ]
     phase2_columns = [
-        col for col in ["Name", "Email", "Company", "Website", "Lead_Score", "Summary", "Pitch", "Status"]
+        col for col in ["Name", "Email", "Company", "Website", "Lead_Score", "Category", "Summary", "Pitch", "Status"]
         if col in df.columns
     ]
 
@@ -898,6 +899,7 @@ if st.session_state.current_file_id != uploaded_file.file_id:
     # ── Build the fresh working DataFrame ─────────────────────────────────────
     df = pd.DataFrame(validated_leads)
     df["Lead_Score"] = ""
+    df["Category"]   = ""
     df["Valid"]      = ""
     df["Summary"]    = ""
     df["Pitch"]      = ""
@@ -922,11 +924,11 @@ else:
 total_leads = len(validated_leads)
 # ── Display columns for each phase ───────────────────────────────────────────
 phase1_columns = [
-    col for col in ["Name", "Email", "Company", "Website", "Valid", "Lead_Score", "Summary", "Status"]
+    col for col in ["Name", "Email", "Company", "Website", "Valid", "Lead_Score", "Category", "Summary", "Status"]
     if col in df.columns
 ]
 phase2_columns = [
-    col for col in ["Name", "Email", "Company", "Website", "Lead_Score", "Summary", "Pitch", "Status"]
+    col for col in ["Name", "Email", "Company", "Website", "Lead_Score", "Category", "Summary", "Pitch", "Status"]
     if col in df.columns
 ]
 
@@ -965,6 +967,14 @@ with col_q1:
         help="Scrapes websites and qualifies each lead against your target industry." if api_keys else "Add API keys in Settings first.",
     )
 
+with col_q2:
+    continue_clicked = st.button(
+        "Continue Qualification",
+        use_container_width=True,
+        disabled=(not api_keys or not target_industry),
+        help="Resumes qualification from the last pending lead." if api_keys else "Add API keys in Settings first.",
+    )
+
 if not api_keys:
     st.info("Enter your API key(s) in the **Settings** page to enable qualification.")
 
@@ -974,7 +984,7 @@ if not api_keys:
 # Runs Agent 2 (scrape) → Agent 3 Phase 1 (qualify_and_summarize) per lead.
 # Valid leads accumulate in session_state.qualified_leads for Phase 2.
 # ──────────────────────────────────────────────────────────────────────────────
-if qualify_clicked and api_keys:
+if (qualify_clicked or continue_clicked) and api_keys:
     scout = WebScout()
     brain = LeadBrain()
 
@@ -983,18 +993,50 @@ if qualify_clicked and api_keys:
     st.markdown('<div class="section-header">Phase 1 — Live Log</div>', unsafe_allow_html=True)
     log_container = st.container()
 
-    processed_count  = 0
-    qualified_count  = 0
-    disqualified_count = 0
-    failed_count     = 0
-    total_score      = 0
-    run_start        = datetime.now()
-    qualified_leads_list = []
+    if continue_clicked:
+        # Calculate existing counts from the current dataframe
+        processed_count  = len(df[~df["Status"].isin(["Pending", "Scraping...", "Qualifying..."])])
+        qualified_count  = len(df[df["Status"] == "Qualified"])
+        disqualified_count = len(df[df["Status"] == "Disqualified"])
+        failed_count     = len(df[df["Status"].isin(["Failed", "Error"])])
+        
+        # Calculate total score correctly from existing valid scores
+        total_score = 0
+        for s in df[df["Valid"] == "Yes"]["Lead_Score"]:
+            try:
+                total_score += int(s)
+            except (ValueError, TypeError):
+                pass
+                
+        qualified_leads_list = st.session_state.qualified_leads.copy() if "qualified_leads" in st.session_state else []
+    else:
+        # Reset everything for a fresh run
+        processed_count  = 0
+        qualified_count  = 0
+        disqualified_count = 0
+        failed_count     = 0
+        total_score      = 0
+        qualified_leads_list = []
+        
+        # Reset the dataframe status to Pending
+        df["Lead_Score"] = ""
+        df["Category"]   = ""
+        df["Valid"]      = ""
+        df["Summary"]    = ""
+        df["Pitch"]      = ""
+        df["Status"]     = "Pending"
+        st.session_state.master_df = df
 
+    run_start = datetime.now()
+    
+    current_avg = total_score / qualified_count if qualified_count > 0 else 0.0
     with metrics_placeholder.container():
-        render_metric_cards(total=total_leads, processed=0, avg_score=0.0, status="running")
+        render_metric_cards(total=total_leads, processed=processed_count, avg_score=current_avg, status="running")
 
     for idx in range(total_leads):
+        if continue_clicked and df.at[idx, "Status"] not in ["Pending", "Scraping...", "Qualifying...", "Failed", "Error"]:
+            continue
+
         lead = validated_leads[idx]
         lead_name = lead.get("Name", f"Lead #{idx + 1}")
         company   = lead.get("Company", "Unknown")
@@ -1071,11 +1113,13 @@ if qualify_clicked and api_keys:
             is_valid = p1_result.get("is_valid", False)
             score    = p1_result.get("score", 0)
             summary  = p1_result.get("summary", "Error.")
+            category = p1_result.get("category", "Unknown")
 
             # Cast all values to str() to prevent PyArrow type crashes.
             df.at[idx, "Valid"]      = "Yes" if is_valid else "No"
             df.at[idx, "Lead_Score"] = str(score)
             df.at[idx, "Summary"]    = summary
+            df.at[idx, "Category"]   = category
 
             if is_valid:
                 df.at[idx, "Status"] = "Qualified"
@@ -1087,6 +1131,7 @@ if qualify_clicked and api_keys:
                 enriched_lead["is_valid"] = True
                 enriched_lead["score"]    = score
                 enriched_lead["summary"]  = summary
+                enriched_lead["category"] = category
                 enriched_lead["_df_idx"]  = idx  # Track original row index
                 qualified_leads_list.append(enriched_lead)
 
