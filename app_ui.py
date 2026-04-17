@@ -32,6 +32,7 @@ import streamlit as st
 import pandas as pd
 import time
 import io
+import os
 import logging
 from datetime import datetime
 
@@ -627,45 +628,48 @@ delay_seconds = st.session_state.delay_seconds
 # ══════════════════════════════════════════════════════════════════════════════
 if nav_selection == "📋 Leads Table":
     st.markdown('<h2 style="color: #0a1628; font-weight: 700; margin-bottom: 0.25rem;">Leads Table</h2>', unsafe_allow_html=True)
-    st.markdown('<p style="color: #6b7280; margin-bottom: 1.5rem;">View Phase 1 results and generate personalized pitches.</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color: #6b7280; margin-bottom: 1.5rem;">View historically verified leads from the database and generate personalized pitches.</p>', unsafe_allow_html=True)
 
-    if not st.session_state.phase1_done:
-        st.markdown("""<div class="ui-card" style="text-align: center; padding: 3rem 2rem;">
-<span style="font-size: 1.5rem; opacity: 0.4; color: #9ca3af;">No data</span>
-<h3 style="color: #6b7280; font-weight: 600; margin: 1rem 0 0.5rem 0;">No leads processed yet</h3>
-<p style="color: #9ca3af; font-size: 0.9rem; max-width: 450px; margin: 0 auto;">
-Head to the <strong>Dashboard</strong> to upload a CSV and run Phase 1 qualification first.
-</p>
-</div>""", unsafe_allow_html=True)
-        st.stop()
-
-    # ── Phase 1 Results DataFrame ─────────────────────────────────────────────
-    df = st.session_state.phase1_df.copy()
-
-    phase1_columns = [
-        col for col in ["Name", "Email", "Company", "Website", "Valid", "Lead_Score", "Category", "Summary", "Status"]
-        if col in df.columns
-    ]
-    phase2_columns = [
-        col for col in ["Name", "Email", "Company", "Website", "Lead_Score", "Category", "Summary", "Pitch", "Status"]
-        if col in df.columns
-    ]
-
-    st.markdown('<div class="ui-card"><div class="ui-card-header">Phase 1 — Qualification Results</div>', unsafe_allow_html=True)
-
-    # Live data table placeholder
-    table_placeholder = st.empty()
-
-    with table_placeholder.container():
-        total_leads = len(df)
+    # ── 1. Historical Leads Database Viewer ───────────────────────────────────
+    st.markdown('<div class="section-header">Historical Database</div>', unsafe_allow_html=True)
+    
+    history_file = "leads_history.csv"
+    if os.path.exists(history_file):
+        hist_df = pd.read_csv(history_file)
+        
+        # Filter UI
+        filter_option = st.radio(
+            "Filter Leads:",
+            ["All Verified Leads", "Qualified Leads (Score 5+)", "Disqualified Leads"],
+            horizontal=True
+        )
+        
+        # Apply filters
+        if filter_option == "Qualified Leads (Score 5+)":
+            display_df = hist_df[hist_df["Valid"] == "Yes"]
+        elif filter_option == "Disqualified Leads":
+            display_df = hist_df[hist_df["Valid"] == "No"]
+        else:
+            display_df = hist_df
+            
+        st.markdown('<div class="ui-card">', unsafe_allow_html=True)
         st.dataframe(
-            df[phase1_columns],
+            display_df,
             use_container_width=True,
-            height=min(400 + (total_leads * 10), 800),
+            height=min(400 + (len(display_df) * 10), 800),
             column_config=COLUMN_CONFIG,
         )
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.info("No leads have been processed yet. The database is empty.")
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Only show Phase 2 operations if there is an active session with valid leads
+    if not (st.session_state.phase1_done and hasattr(st.session_state, "phase1_df") and "Valid" in st.session_state.phase1_df.columns):
+        st.stop()
+
+    df = st.session_state.phase1_df.copy()
+    phase1_columns = [col for col in ["Name", "Email", "Company", "Website", "Valid", "Lead_Score", "Category", "Summary", "Status"] if col in df.columns]
+    phase2_columns = [col for col in ["Name", "Email", "Company", "Website", "Lead_Score", "Category", "Summary", "Pitch", "Status"] if col in df.columns]
 
     # ── Download: Qualified CSV ───────────────────────────────────────────────
     qualified_df = df[df["Valid"] == "Yes"][phase1_columns].copy()
@@ -851,11 +855,13 @@ with metrics_placeholder.container():
 # ── CSV Upload area inside a clean white card ─────────────────────────────────
 st.markdown('<div class="ui-card"><div class="ui-card-header">Upload Lead Data</div>', unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader(
-    "Upload your leads CSV",
-    type=["csv"],
-    help="Expected columns: Name, Email, Role, Company, Industry, Location, LinkedIn, Website",
-)
+col_space_1, col_uploader, col_space_2 = st.columns([1, 2, 1])
+with col_uploader:
+    uploaded_file = st.file_uploader(
+        "Upload your leads CSV",
+        type=["csv"],
+        help="Expected columns: Name, Email, Role, Company, Industry, Location, LinkedIn, Website",
+    )
 
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1141,6 +1147,15 @@ if (qualify_clicked or continue_clicked) and api_keys:
             df.at[idx, "Lead_Score"] = str(score)
             df.at[idx, "Summary"]    = summary
             df.at[idx, "Category"]   = category
+
+            # Persist this lead to local database
+            history_file = "leads_history.csv"
+            header = not os.path.exists(history_file)
+            try:
+                # We use double brackets [[idx]] to get a DataFrame rather than a Series
+                df.iloc[[idx]][phase1_columns].to_csv(history_file, mode="a", header=header, index=False)
+            except Exception as hist_err:
+                logger.error(f"Failed to append to history db: %s", hist_err)
 
             if is_valid:
                 df.at[idx, "Status"] = "Qualified"
