@@ -67,8 +67,11 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
     /* ── Global overrides ────────────────────────────────────────────────── */
-    *, html, body, [class*="css"] {
+    html, body, [class*="st-"]:not(.material-symbols-rounded):not([class*="icon"]):not(svg) {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    }
+    .material-symbols-rounded, [class*="icon"] {
+        font-family: 'Material Symbols Rounded' !important;
     }
 
     /* ── Main background ─────────────────────────────────────────────────── */
@@ -904,6 +907,7 @@ with col_uploader:
         "Upload your leads CSV",
         type=["csv"],
         help="Expected columns: Name, Email, Role, Company, Industry, Location, LinkedIn, Website",
+        label_visibility="collapsed"
     )
 
 st.markdown('</div>', unsafe_allow_html=True)
