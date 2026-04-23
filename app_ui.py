@@ -834,7 +834,14 @@ This will make <b>{qualified_count_p2}</b> additional AI calls.
         progress_bar_p2 = st.progress(0, text="Initializing Phase 2...")
 
         st.markdown('<div class="section-header">Phase 2 — Live Log</div>', unsafe_allow_html=True)
-        log_container_p2 = st.container()
+        log_container_p2 = st.empty()
+        phase2_logs = []
+
+        def add_log_p2(html_string):
+            phase2_logs.append(html_string)
+            if len(phase2_logs) > 20:
+                phase2_logs.pop(0)
+            log_container_p2.markdown("".join(phase2_logs), unsafe_allow_html=True)
 
         p2_success = 0
         p2_failed  = 0
@@ -857,12 +864,7 @@ This will make <b>{qualified_count_p2}</b> additional AI calls.
             )
 
             try:
-                with log_container_p2:
-                    st.markdown(
-                        f'<div class="log-entry">[{q_idx + 1}/{qualified_count_p2}] '
-                        f'Generating pitch for <b>{lead_name}</b> at {company}...</div>',
-                        unsafe_allow_html=True,
-                    )
+                add_log_p2(f'<div class="log-entry">[{q_idx + 1}/{qualified_count_p2}] Generating pitch for <b>{lead_name}</b> at {company}...</div>')
 
                 p2_result = brain.generate_pitch(
                     lead_data=q_lead,
@@ -879,23 +881,14 @@ This will make <b>{qualified_count_p2}</b> additional AI calls.
                 df.at[df_row, "Status"] = "Pitched"
                 p2_success += 1
 
-                with log_container_p2:
-                    st.markdown(
-                        f'<div class="log-entry log-success">'
-                        f'{company} — Pitch: {pitch[:100]}...</div>',
-                        unsafe_allow_html=True,
-                    )
+                add_log_p2(f'<div class="log-entry log-success">{company} — Pitch: {pitch[:100]}...</div>')
 
             except Exception as e:
                 df.at[df_row, "Pitch"]  = "Error — see log"
                 df.at[df_row, "Status"] = "Pitch Failed"
                 p2_failed += 1
 
-                with log_container_p2:
-                    st.markdown(
-                        f'<div class="log-entry log-error">Pitch failed: {company} — {str(e)[:100]}</div>',
-                        unsafe_allow_html=True,
-                    )
+                add_log_p2(f'<div class="log-entry log-error">Pitch failed: {company} — {str(e)[:100]}</div>')
 
             # ── Live table update ─────────────────────────────────────────────
             table_placeholder.dataframe(df[phase2_columns], use_container_width=True,
@@ -1131,7 +1124,14 @@ if (qualify_clicked or continue_clicked) and api_keys:
     progress_bar = st.progress(0, text="Initializing Phase 1...")
 
     st.markdown('<div class="section-header">Phase 1 — Live Log</div>', unsafe_allow_html=True)
-    log_container = st.container()
+    log_container = st.empty()
+    phase1_logs = []
+
+    def add_log_p1(html_string):
+        phase1_logs.append(html_string)
+        if len(phase1_logs) > 20:
+            phase1_logs.pop(0)
+        log_container.markdown("".join(phase1_logs), unsafe_allow_html=True)
 
     if continue_clicked:
         # Calculate existing counts from the current dataframe
@@ -1193,12 +1193,7 @@ if (qualify_clicked or continue_clicked) and api_keys:
 
         try:
             # ── AGENT 2: Scrape Website ───────────────────────────────────────
-            with log_container:
-                st.markdown(
-                    f'<div class="log-entry">[{idx + 1}/{total_leads}] '
-                    f'Scraping <b>{company}</b> — {url}</div>',
-                    unsafe_allow_html=True,
-                )
+            add_log_p1(f'<div class="log-entry">[{idx + 1}/{total_leads}] Scraping <b>{company}</b> — {url}</div>')
 
             scraped_data = scout.scrape_website(url, email=lead.get("Email", ""), person_name=lead.get("Name", ""))
 
@@ -1206,20 +1201,12 @@ if (qualify_clicked or continue_clicked) and api_keys:
                 lead["scrape_error"]    = scraped_data["error"]
                 lead["scraped_title"]   = None
                 lead["scraped_content"] = None
-                with log_container:
-                    st.markdown(
-                        f'<div class="log-entry log-warning">Scrape failed: {scraped_data["error"][:80]}</div>',
-                        unsafe_allow_html=True,
-                    )
+                add_log_p1(f'<div class="log-entry log-warning">Scrape failed: {scraped_data["error"][:80]}</div>')
             else:
                 lead["scrape_error"]    = None
                 lead["scraped_title"]   = scraped_data.get("title")
                 lead["scraped_content"] = scraped_data.get("content")
-                with log_container:
-                    st.markdown(
-                        f'<div class="log-entry log-success">Scraped: {scraped_data.get("title", "N/A")}</div>',
-                        unsafe_allow_html=True,
-                    )
+                add_log_p1(f'<div class="log-entry log-success">Scraped: {scraped_data.get("title", "N/A")}</div>')
 
             # ── Merge verification signals into lead dict ─────────────────────
             lead["domain_alive"]         = scraped_data.get("domain_alive", False)
@@ -1233,11 +1220,7 @@ if (qualify_clicked or continue_clicked) and api_keys:
             table_placeholder.dataframe(df[phase1_columns], use_container_width=True,
                                         height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
-            with log_container:
-                st.markdown(
-                    f'<div class="log-entry">Qualifying <b>{lead_name}</b> against "{target_industry}"...</div>',
-                    unsafe_allow_html=True,
-                )
+            add_log_p1(f'<div class="log-entry">Qualifying <b>{lead_name}</b> against "{target_industry}"...</div>')
 
             p1_result = brain.qualify_and_summarize(
                 lead_data=lead,
@@ -1283,22 +1266,12 @@ if (qualify_clicked or continue_clicked) and api_keys:
                 enriched_lead["_df_idx"]  = idx  # Track original row index
                 qualified_leads_list.append(enriched_lead)
 
-                with log_container:
-                    st.markdown(
-                        f'<div class="log-entry log-success">'
-                        f'{company} — QUALIFIED | Score: {score}/10 | {summary[:80]}...</div>',
-                        unsafe_allow_html=True,
-                    )
+                add_log_p1(f'<div class="log-entry log-success">{company} — QUALIFIED | Score: {score}/10 | {summary[:80]}...</div>')
             else:
                 df.at[idx, "Status"] = "Disqualified"
                 disqualified_count += 1
 
-                with log_container:
-                    st.markdown(
-                        f'<div class="log-entry log-warning">'
-                        f'{company} — DISQUALIFIED (not {target_industry}) | {summary[:80]}</div>',
-                        unsafe_allow_html=True,
-                    )
+                add_log_p1(f'<div class="log-entry log-warning">{company} — DISQUALIFIED (not {target_industry}) | {summary[:80]}</div>')
 
         except Exception as e:
             st.session_state.master_df.at[idx, "Lead_Score"] = str(0)
@@ -1307,11 +1280,7 @@ if (qualify_clicked or continue_clicked) and api_keys:
             st.session_state.master_df.at[idx, "Status"]     = "Failed"
             failed_count += 1
 
-            with log_container:
-                st.markdown(
-                    f'<div class="log-entry log-error">Failed: {company} — {str(e)[:100]}</div>',
-                    unsafe_allow_html=True,
-                )
+            add_log_p1(f'<div class="log-entry log-error">Failed: {company} — {str(e)[:100]}</div>')
 
         # ── Update counters & live UI ─────────────────────────────────────────
         processed_count += 1
