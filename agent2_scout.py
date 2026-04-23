@@ -448,6 +448,28 @@ class WebScout:
         return " ".join(content_parts)
 
     # ──────────────────────────────────────────────────────────────────────────
+    # PRIVATE HELPER: _scrape_via_jina
+    # ──────────────────────────────────────────────────────────────────────────
+    def _scrape_via_jina(self, url: str) -> dict:
+        """
+        Fallback scraper using Jina Reader API (https://r.jina.ai/).
+        Bypasses bot protection and JS-rendering issues.
+        Returns a dict with 'title' and 'content' (markdown).
+        """
+        jina_url = f"https://r.jina.ai/{url}"
+        headers = {"Accept": "application/json"}
+        try:
+            resp = self.session.get(jina_url, headers=headers, timeout=REQUEST_TIMEOUT * 2)
+            resp.raise_for_status()
+            data = resp.json().get("data", {})
+            title = data.get("title") or "No title found"
+            content = data.get("content") or "No content extracted"
+            return {"title": title, "content": content[:MAX_CONTENT_CHARS]}
+        except Exception as e:
+            logger.warning("Jina Reader API fallback failed for %s: %s", url, str(e))
+            return None
+
+    # ──────────────────────────────────────────────────────────────────────────
     # PUBLIC METHOD: scrape_website
     # Core scraping unit. Self-healing with exponential-backoff retry logic.
     # ──────────────────────────────────────────────────────────────────────────
@@ -506,38 +528,64 @@ class WebScout:
             try:
                 logger.debug("Attempt %d/%d for: %s", attempt, MAX_RETRIES, url)
 
-                response = self.session.get(
-                    url,
-                    headers=self._get_headers(),
-                    timeout=REQUEST_TIMEOUT,
-                    allow_redirects=True,  # Follow HTTP 301/302 redirects
-                )
-
-                # ── HTTP STATUS CHECK ─────────────────────────────────────────
-                # raise_for_status() converts 4xx/5xx into exceptions so they
-                # are caught by the RequestException handler below.
-                response.raise_for_status()
-
-                # ── SUCCESSFUL RESPONSE ───────────────────────────────────────
-                logger.debug(
-                    "HTTP %d received for: %s (%.2f KB)",
-                    response.status_code,
-                    url,
-                    len(response.content) / 1024,
-                )
-
-                # ── HTML PARSING ──────────────────────────────────────────────
-                # lxml is the fastest parser; falls back to html.parser if
-                # lxml is not installed (no crash, just slightly slower).
+                use_jina = False
+                fetch_err_msg = ""
+                
                 try:
-                    soup = BeautifulSoup(response.text, "lxml")
-                except Exception:
-                    logger.debug("lxml unavailable, falling back to html.parser.")
-                    soup = BeautifulSoup(response.text, "html.parser")
+                    response = self.session.get(
+                        url,
+                        headers=self._get_headers(),
+                        timeout=REQUEST_TIMEOUT,
+                        allow_redirects=True,  # Follow HTTP 301/302 redirects
+                    )
+                    
+                    if response.status_code in (401, 403, 429, 500, 502, 503):
+                        use_jina = True
+                        fetch_err_msg = f"HTTP {response.status_code}"
+                    else:
+                        response.raise_for_status()
+                except requests.exceptions.RequestException as req_err:
+                    use_jina = True
+                    fetch_err_msg = str(req_err)
+                
+                if use_jina:
+                    logger.warning("Primary request failed for %s (%s). Attempting Jina Reader fallback...", url, fetch_err_msg)
+                    jina_res = self._scrape_via_jina(url)
+                    if jina_res:
+                        title = jina_res["title"]
+                        content = jina_res["content"]
+                        # Create a pseudo-soup for verification checks
+                        soup = BeautifulSoup(f"<html><head><title>{title}</title></head><body><p>{content}</p></body></html>", "html.parser")
+                    else:
+                        # If Jina also failed, raise exception to trigger retry loop
+                        raise requests.exceptions.RequestException(f"Primary fetch failed ({fetch_err_msg}) and Jina fallback also failed.")
+                else:
+                    # ── SUCCESSFUL PRIMARY RESPONSE ───────────────────────────────
+                    logger.debug(
+                        "HTTP %d received for: %s (%.2f KB)",
+                        response.status_code,
+                        url,
+                        len(response.content) / 1024,
+                    )
 
-                # ── CONTENT EXTRACTION ────────────────────────────────────────
-                title   = self._extract_title(soup)
-                content = self._extract_paragraph_content(soup)
+                    # ── HTML PARSING ──────────────────────────────────────────────
+                    try:
+                        soup = BeautifulSoup(response.text, "lxml")
+                    except Exception:
+                        soup = BeautifulSoup(response.text, "html.parser")
+
+                    # ── CONTENT EXTRACTION ────────────────────────────────────────
+                    title   = self._extract_title(soup)
+                    content = self._extract_paragraph_content(soup)
+                    
+                    # ── FALLBACK FOR INSUFFICIENT CONTENT (JS SPA) ────────────────
+                    if len(content.strip()) < 200:
+                        logger.info("Primary scrape yielded insufficient content (< 200 chars) for %s. Attempting Jina Reader...", url)
+                        jina_res = self._scrape_via_jina(url)
+                        if jina_res and len(jina_res["content"]) > len(content.strip()):
+                            title = jina_res["title"]
+                            content = jina_res["content"]
+                            soup = BeautifulSoup(f"<html><head><title>{title}</title></head><body><p>{content}</p></body></html>", "html.parser")
 
                 # ── VERIFICATION CHECKS ───────────────────────────────────────
                 email_result  = self._find_email_on_page(soup, email, url)
@@ -577,13 +625,6 @@ class WebScout:
                     "Scrape failed for %s: %s (Attempt %d/%d)",
                     url, last_error, attempt, MAX_RETRIES,
                 )
-
-            except requests.exceptions.HTTPError as http_err:
-                # HTTP 4xx/5xx — retrying these is rarely useful, so we bail
-                # immediately instead of waiting through backoff cycles.
-                last_error = f"HTTP error: {http_err}"
-                logger.warning("Scrape failed for %s: %s — Not retrying.", url, last_error)
-                break
 
             except requests.exceptions.RequestException as req_err:
                 last_error = str(req_err)
