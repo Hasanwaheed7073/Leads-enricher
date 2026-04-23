@@ -500,6 +500,7 @@ class LeadBrain:
         api_keys:        list[str],
         api_base_url:    str = DEFAULT_API_BASE_URL,
         model_name:      str = DEFAULT_MODEL,
+        is_career_coaching: bool = False,
     ) -> dict:
         """
         Phase 1 — Industry Qualification, Scoring & Summarization.
@@ -605,17 +606,54 @@ class LeadBrain:
         }
 
         # ── SYSTEM PROMPT ─────────────────────────────────────────────────────
-        system_prompt = (
-            "You are an expert HVAC industry analyst and lead verification specialist. "
-            "Your job is to determine if a business is a REAL, ACTIVE HVAC contractor "
-            "with a working website. You must cross-reference ALL verification signals. "
-            "Do NOT qualify based on company name alone — you need real evidence. "
-            "You ALWAYS respond with raw JSON only — no markdown, no code fences, no explanation."
-        )
+        if is_career_coaching:
+            system_prompt = (
+                "You are an expert Career Coaching industry analyst and lead verification specialist. "
+                "Your job is to determine if the provided data belongs to a REAL, ACTIVE Career Coach "
+                "or coaching professional. Focus on verifying if the data is true or false based on the signals. "
+                "You ALWAYS respond with raw JSON only — no markdown, no code fences, no explanation."
+            )
+            
+            user_prompt = f"""Analyze ALL signals to verify if this lead is a REAL Career Coach or related professional.
 
-        # ── USER PROMPT ───────────────────────────────────────────────────────
-        # Multi-signal qualification with strict verification requirements.
-        user_prompt = f"""Analyze ALL signals to determine if this lead is a REAL, VERIFIED business in the "{target_industry}" industry.
+Lead data:
+{json.dumps(clean_lead, indent=2)}
+
+Scraped website context:
+{json.dumps(clean_scraped, indent=2)}
+
+Verification signals:
+{json.dumps(verification_context, indent=2)}
+
+=== CRITICAL VERIFICATION RULES ===
+1. Verify if the person or company offers career coaching, executive coaching, or professional development services.
+2. Even if they don't have a massive corporate website, look for indicators of coaching activity.
+3. If the data is clearly dummy or completely unrelated, score low.
+
+=== SCORING RUBRIC ===
+- Score 9-10: Strong evidence of Career Coaching services.
+- Score 7-8: Likely a Career Coach based on the data.
+- Score 5-6: Plausible coach or related consulting professional.
+- Score 1-4: Insufficient evidence or unrelated business.
+- Score 0: Fake data.
+
+Set is_valid to true ONLY if score is 5 or above.
+Also determine a short, 1-3 word "category" for this lead.
+
+Return ONLY a raw JSON object:
+{{"is_valid": true, "score": 8, "summary": "one sentence explaining the score, mentioning which checks passed/failed", "category": "Executive Coach"}}"""
+        else:
+            system_prompt = (
+                "You are an expert HVAC industry analyst and lead verification specialist. "
+                "Your job is to determine if a business is a REAL, ACTIVE HVAC contractor "
+                "with a working website. You must cross-reference ALL verification signals. "
+                "Do NOT qualify based on company name alone — you need real evidence. "
+                "You ALWAYS respond with raw JSON only — no markdown, no code fences, no explanation."
+            )
+
+            # ── USER PROMPT ───────────────────────────────────────────────────────
+            # Multi-signal qualification with strict verification requirements.
+            user_prompt = f"""Analyze ALL signals to determine if this lead is a REAL, VERIFIED business in the "{target_industry}" industry.
 
 Lead data:
 {json.dumps(clean_lead, indent=2)}
@@ -697,7 +735,7 @@ Return ONLY a raw JSON object:
 
         # ── POST-AI SCORE CEILING ENFORCEMENT ─────────────────────────────────
         # Even if the AI over-scores, hard caps prevent false positives.
-        if isinstance(score, int):
+        if isinstance(score, int) and not is_career_coaching:
 
             # CAP 1: Website content was not scrapeable → max 2
             if scraped_data.get("scrape_error") is not None:
@@ -752,6 +790,7 @@ Return ONLY a raw JSON object:
         api_keys:     list[str],
         api_base_url: str = DEFAULT_API_BASE_URL,
         model_name:   str = DEFAULT_MODEL,
+        is_career_coaching: bool = False,
     ) -> dict:
         """
         Phase 2 — Personalized Pitch Generation.
@@ -797,7 +836,22 @@ Return ONLY a raw JSON object:
         )
 
         # ── USER PROMPT ───────────────────────────────────────────────────────
-        user_prompt = f"""Write a 3-sentence personalized cold email pitch to {lead_name} at {company}.
+        if is_career_coaching:
+            user_prompt = f"""Write a 3-sentence personalized cold email pitch to {lead_name} at {company}, who is a Career Coach.
+
+Use this business summary for context:
+"{summary}"
+
+Rules for the pitch:
+- Sentence 1: Open by referencing a SPECIFIC detail from the summary (not generic flattery).
+- Sentence 2: Clearly state the value proposition — what you can do to help them grow their coaching business.
+- Sentence 3: End with a soft, low-friction call-to-action.
+- Keep it conversational, not corporate.
+
+Return ONLY a raw JSON object with one key:
+{{"pitch": "Your three sentence pitch here."}}"""
+        else:
+            user_prompt = f"""Write a 3-sentence personalized cold email pitch to {lead_name} at {company}.
 
 Use this business summary for context:
 "{summary}"

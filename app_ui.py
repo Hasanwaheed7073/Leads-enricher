@@ -542,6 +542,8 @@ if "model_name" not in st.session_state:
     st.session_state.model_name = "llama-3.3-70b-versatile"
 if "target_industry" not in st.session_state:
     st.session_state.target_industry = "HVAC Contractors"
+if "is_career_coaching" not in st.session_state:
+    st.session_state.is_career_coaching = False
 if "delay_seconds" not in st.session_state:
     st.session_state.delay_seconds = 2
 
@@ -654,6 +656,12 @@ if nav_selection == "⚙️ Settings":
         help="Leads that don't match this industry will be filtered out in Phase 1.",
     )
 
+    st.session_state.is_career_coaching = st.checkbox(
+        "Career Coaching Filter",
+        value=st.session_state.is_career_coaching,
+        help="If checked, agents will qualify leads as Career Coaches and verify data to return a summary with score.",
+    )
+
     st.session_state.delay_seconds = st.slider(
         "Minimum Qualification Score",
         min_value=1,
@@ -686,6 +694,7 @@ selected_provider = st.session_state.selected_provider
 api_base_url = st.session_state.api_base_url
 model_name = st.session_state.model_name
 target_industry = st.session_state.target_industry
+is_career_coaching = st.session_state.is_career_coaching
 delay_seconds = st.session_state.delay_seconds
 
 
@@ -800,9 +809,8 @@ This will make <b>{qualified_count_p2}</b> additional AI calls.
 
             df.at[df_row, "Status"] = "Pitching..."
 
-            with table_placeholder.container():
-                st.dataframe(df[phase2_columns], use_container_width=True,
-                             height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+            table_placeholder.dataframe(df[phase2_columns], use_container_width=True,
+                                        height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
             progress_bar_p2.progress(
                 q_idx / qualified_count_p2,
@@ -823,6 +831,7 @@ This will make <b>{qualified_count_p2}</b> additional AI calls.
                     api_keys=api_keys,
                     api_base_url=api_base_url,
                     model_name=model_name,
+                    is_career_coaching=is_career_coaching,
                 )
 
                 pitch = p2_result.get("pitch", "Error generating pitch.")
@@ -850,9 +859,8 @@ This will make <b>{qualified_count_p2}</b> additional AI calls.
                     )
 
             # ── Live table update ─────────────────────────────────────────────
-            with table_placeholder.container():
-                st.dataframe(df[phase2_columns], use_container_width=True,
-                             height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+            table_placeholder.dataframe(df[phase2_columns], use_container_width=True,
+                                        height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
             if q_idx < qualified_count_p2 - 1:
                 time.sleep(delay_seconds)
@@ -1036,13 +1044,12 @@ st.markdown('<div class="section-header">Lead Spreadsheet</div>', unsafe_allow_h
 # ── Live Data Table Placeholder ───────────────────────────────────────────────
 table_placeholder = st.empty()
 
-with table_placeholder.container():
-    st.dataframe(
-        df[phase1_columns],
-        use_container_width=True,
-        height=min(400 + (total_leads * 10), 800),
-        column_config=COLUMN_CONFIG,
-    )
+table_placeholder.dataframe(
+    df[phase1_columns],
+    use_container_width=True,
+    height=min(400 + (total_leads * 10), 800),
+    column_config=COLUMN_CONFIG,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1137,9 +1144,8 @@ if (qualify_clicked or continue_clicked) and api_keys:
         url       = lead.get("Website", "")
 
         df.at[idx, "Status"] = "Scraping..."
-        with table_placeholder.container():
-            st.dataframe(df[phase1_columns], use_container_width=True,
-                         height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+        table_placeholder.dataframe(df[phase1_columns], use_container_width=True,
+                                    height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
         progress_bar.progress(
             idx / total_leads,
@@ -1185,9 +1191,8 @@ if (qualify_clicked or continue_clicked) and api_keys:
 
             # ── AGENT 3 — Phase 1: Qualify & Summarize ────────────────────────
             df.at[idx, "Status"] = "Qualifying..."
-            with table_placeholder.container():
-                st.dataframe(df[phase1_columns], use_container_width=True,
-                             height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+            table_placeholder.dataframe(df[phase1_columns], use_container_width=True,
+                                        height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
             with log_container:
                 st.markdown(
@@ -1202,6 +1207,7 @@ if (qualify_clicked or continue_clicked) and api_keys:
                 api_keys=api_keys,
                 api_base_url=api_base_url,
                 model_name=model_name,
+                is_career_coaching=is_career_coaching,
             )
 
             is_valid = p1_result.get("is_valid", False)
@@ -1272,9 +1278,8 @@ if (qualify_clicked or continue_clicked) and api_keys:
         processed_count += 1
         current_avg = total_score / qualified_count if qualified_count > 0 else 0.0
 
-        with table_placeholder.container():
-            st.dataframe(st.session_state.master_df[phase1_columns], use_container_width=True,
-                         height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+        table_placeholder.dataframe(st.session_state.master_df[phase1_columns], use_container_width=True,
+                                    height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
         with metrics_placeholder.container():
             render_metric_cards(
