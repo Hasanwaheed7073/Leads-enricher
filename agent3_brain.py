@@ -627,15 +627,15 @@ Verification signals:
 
 === CRITICAL VERIFICATION RULES ===
 1. Verify if the person or company offers career coaching, executive coaching, or professional development services.
-2. Even if they don't have a massive corporate website, look for indicators of coaching activity.
+2. If website_was_scrapeable is false → the website could not be loaded. Maximum score: 2. You MUST crawl the website to qualify the lead.
 3. If the data is clearly dummy or completely unrelated, score low.
 
 === SCORING RUBRIC ===
-- Score 9-10: Strong evidence of Career Coaching services.
-- Score 7-8: Likely a Career Coach based on the data.
+- Score 9-10: Working website with strong evidence of Career Coaching services.
+- Score 7-8: Working website, likely a Career Coach based on the data.
 - Score 5-6: Plausible coach or related consulting professional.
 - Score 1-4: Insufficient evidence or unrelated business.
-- Score 0: Fake data.
+- Score 0: Fake data or dead domain.
 
 Set is_valid to true ONLY if score is 5 or above.
 Also determine a short, 1-3 word "category" for this lead.
@@ -735,7 +735,7 @@ Return ONLY a raw JSON object:
 
         # ── POST-AI SCORE CEILING ENFORCEMENT ─────────────────────────────────
         # Even if the AI over-scores, hard caps prevent false positives.
-        if isinstance(score, int) and not is_career_coaching:
+        if isinstance(score, int):
 
             # CAP 1: Website content was not scrapeable → max 2
             if scraped_data.get("scrape_error") is not None:
@@ -747,25 +747,26 @@ Return ONLY a raw JSON object:
                     score = 2
                     summary += " [Capped: website not scrapeable]"
 
-            # CAP 2: Email doesn't match AND not on page → max 4
-            if not email_domain_matches and not email_found_on_page:
-                if score > 4:
-                    logger.warning(
-                        "SCORE CAP: '%s' capped from %d to 4 — email not verified.",
-                        lead_name, score,
-                    )
-                    score = 4
-                    summary += " [Capped: email unverified]"
+            if not is_career_coaching:
+                # CAP 2: Email doesn't match AND not on page → max 4
+                if not email_domain_matches and not email_found_on_page:
+                    if score > 4:
+                        logger.warning(
+                            "SCORE CAP: '%s' capped from %d to 4 — email not verified.",
+                            lead_name, score,
+                        )
+                        score = 4
+                        summary += " [Capped: email unverified]"
 
-            # CAP 3: Person not found on website → max 6
-            if not person_found_on_page:
-                if score > 6:
-                    logger.warning(
-                        "SCORE CAP: '%s' capped from %d to 6 — person not found on website.",
-                        lead_name, score,
-                    )
-                    score = 6
-                    summary += " [Capped: person not on website]"
+                # CAP 3: Person not found on website → max 6
+                if not person_found_on_page:
+                    if score > 6:
+                        logger.warning(
+                            "SCORE CAP: '%s' capped from %d to 6 — person not found on website.",
+                            lead_name, score,
+                        )
+                        score = 6
+                        summary += " [Capped: person not on website]"
 
             # Enforce is_valid based on final capped score
             is_valid = score >= 5
