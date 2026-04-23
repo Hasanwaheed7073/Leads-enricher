@@ -33,8 +33,28 @@ import pandas as pd
 import time
 import io
 import os
+import json
 import logging
 from datetime import datetime
+
+# ── Settings Persistence ──────────────────────────────────────────────────────
+SETTINGS_FILE = "settings.json"
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            st.warning(f"Could not load settings: {e}")
+    return {}
+
+def save_settings(settings_dict):
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings_dict, f, indent=4)
+    except Exception as e:
+        st.warning(f"Could not save settings: {e}")
 
 # ── Agent Imports ─────────────────────────────────────────────────────────────
 from agent1_ingestor import LeadIngestor
@@ -530,22 +550,26 @@ if "current_file_id" not in st.session_state:
 # ──────────────────────────────────────────────────────────────────────────────
 # SETTINGS STATE — Persist settings across nav pages so they survive reruns.
 # ──────────────────────────────────────────────────────────────────────────────
+loaded_settings = load_settings() if "settings_loaded" not in st.session_state else {}
+if "settings_loaded" not in st.session_state:
+    st.session_state.settings_loaded = True
+
 if "api_keys_raw" not in st.session_state:
-    st.session_state.api_keys_raw = ""
+    st.session_state.api_keys_raw = loaded_settings.get("api_keys_raw", "")
 if "api_keys_list" not in st.session_state:
-    st.session_state.api_keys_list = [""]
+    st.session_state.api_keys_list = loaded_settings.get("api_keys_list", [""])
 if "selected_provider" not in st.session_state:
-    st.session_state.selected_provider = "Grok (x.ai)"
+    st.session_state.selected_provider = loaded_settings.get("selected_provider", "Grok (x.ai)")
 if "api_base_url" not in st.session_state:
-    st.session_state.api_base_url = "https://api.x.ai/v1/chat/completions"
+    st.session_state.api_base_url = loaded_settings.get("api_base_url", "https://api.x.ai/v1/chat/completions")
 if "model_name" not in st.session_state:
-    st.session_state.model_name = "llama-3.3-70b-versatile"
+    st.session_state.model_name = loaded_settings.get("model_name", "llama-3.3-70b-versatile")
 if "target_industry" not in st.session_state:
-    st.session_state.target_industry = "HVAC Contractors"
+    st.session_state.target_industry = loaded_settings.get("target_industry", "HVAC Contractors")
 if "is_career_coaching" not in st.session_state:
-    st.session_state.is_career_coaching = False
+    st.session_state.is_career_coaching = loaded_settings.get("is_career_coaching", False)
 if "delay_seconds" not in st.session_state:
-    st.session_state.delay_seconds = 2
+    st.session_state.delay_seconds = loaded_settings.get("delay_seconds", 2)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -681,6 +705,21 @@ if nav_selection == "⚙️ Settings":
             f'{len(api_keys_parsed)} API key{"s" if len(api_keys_parsed) > 1 else ""} loaded for rotation</span></div>',
             unsafe_allow_html=True,
         )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("💾 Save Settings Permanently", use_container_width=True, help="Save these settings so they survive app restarts."):
+        settings_to_save = {
+            "api_keys_raw": st.session_state.api_keys_raw,
+            "api_keys_list": st.session_state.api_keys_list,
+            "selected_provider": st.session_state.selected_provider,
+            "api_base_url": st.session_state.api_base_url,
+            "model_name": st.session_state.model_name,
+            "target_industry": st.session_state.target_industry,
+            "is_career_coaching": st.session_state.is_career_coaching,
+            "delay_seconds": st.session_state.delay_seconds,
+        }
+        save_settings(settings_to_save)
+        st.success("Settings saved successfully! They will automatically load next time.")
 
     st.stop()
 
