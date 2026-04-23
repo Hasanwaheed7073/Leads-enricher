@@ -747,7 +747,7 @@ if nav_selection == "📋 Leads Table":
     # ── 1. Historical Leads Database Viewer ───────────────────────────────────
     st.markdown('<div class="section-header">Historical Database</div>', unsafe_allow_html=True)
     
-    history_file = "leads_history.csv"
+    history_file = ".leads_history.csv"
     if os.path.exists(history_file):
         hist_df = pd.read_csv(history_file)
         
@@ -855,8 +855,10 @@ This will make <b>{qualified_count_p2}</b> additional AI calls.
 
             df.at[df_row, "Status"] = "Pitching..."
 
-            table_placeholder.dataframe(df[phase2_columns], use_container_width=True,
-                                        height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+            # Throttled update
+            if q_idx % 3 == 0 or q_idx == qualified_count_p2 - 1:
+                table_placeholder.dataframe(df[phase2_columns], use_container_width=True,
+                                            height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
             progress_bar_p2.progress(
                 q_idx / qualified_count_p2,
@@ -891,8 +893,8 @@ This will make <b>{qualified_count_p2}</b> additional AI calls.
                 add_log_p2(f'<div class="log-entry log-error">Pitch failed: {company} — {str(e)[:100]}</div>')
 
             # ── Live table update ─────────────────────────────────────────────
-            table_placeholder.dataframe(df[phase2_columns], use_container_width=True,
-                                        height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+            # Update happens via the throttled check at the start of the loop
+            # and one final update at the end of the phase.
 
             if q_idx < qualified_count_p2 - 1:
                 time.sleep(delay_seconds)
@@ -1183,8 +1185,11 @@ if (qualify_clicked or continue_clicked) and api_keys:
         url       = lead.get("Website", "")
 
         df.at[idx, "Status"] = "Scraping..."
-        table_placeholder.dataframe(df[phase1_columns], use_container_width=True,
-                                    height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+        
+        # Throttle dataframe updates to prevent WebSocket flooding / browser crashes
+        if idx % 3 == 0 or idx == total_leads - 1:
+            table_placeholder.dataframe(df[phase1_columns], use_container_width=True,
+                                        height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
 
         progress_bar.progress(
             idx / total_leads,
@@ -1217,8 +1222,8 @@ if (qualify_clicked or continue_clicked) and api_keys:
 
             # ── AGENT 3 — Phase 1: Qualify & Summarize ────────────────────────
             df.at[idx, "Status"] = "Qualifying..."
-            table_placeholder.dataframe(df[phase1_columns], use_container_width=True,
-                                        height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+            
+            # Don't update the UI dataframe here, it will be updated on the next loop or at the end.
 
             add_log_p1(f'<div class="log-entry">Qualifying <b>{lead_name}</b> against "{target_industry}"...</div>')
 
@@ -1244,7 +1249,7 @@ if (qualify_clicked or continue_clicked) and api_keys:
             df.at[idx, "Category"]   = category
 
             # Persist this lead to local database
-            history_file = "leads_history.csv"
+            history_file = ".leads_history.csv"
             header = not os.path.exists(history_file)
             try:
                 # We use double brackets [[idx]] to get a DataFrame rather than a Series
@@ -1286,9 +1291,6 @@ if (qualify_clicked or continue_clicked) and api_keys:
         processed_count += 1
         current_avg = total_score / qualified_count if qualified_count > 0 else 0.0
 
-        table_placeholder.dataframe(st.session_state.master_df[phase1_columns], use_container_width=True,
-                                    height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
-
         with metrics_placeholder.container():
             render_metric_cards(
                 total=total_leads, processed=processed_count,
@@ -1300,6 +1302,11 @@ if (qualify_clicked or continue_clicked) and api_keys:
 
     # ── PHASE 1 COMPLETE ──────────────────────────────────────────────────────
     progress_bar.progress(1.0, text="Phase 1 complete")
+    
+    # Final dataframe update to ensure all rows are current
+    table_placeholder.dataframe(st.session_state.master_df[phase1_columns], use_container_width=True,
+                                height=min(400 + (total_leads * 10), 800), column_config=COLUMN_CONFIG)
+                                
     scout.close()
 
     elapsed = datetime.now() - run_start
