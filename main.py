@@ -1,19 +1,22 @@
 """
 ================================================================================
-LEAD SNIPER — MASTER ORCHESTRATOR
+LEAD SNIPER — MASTER ORCHESTRATOR (CLI MODE)
 ================================================================================
 Responsibility:
     Wire AGENT 1 (Ingestor) → AGENT 2 (Scout) → AGENT 3 (Brain) into a single
-    autonomous pipeline. Reads raw lead CSV, scrapes each website, scores the
-    lead via AI, generates a personalized pitch, and writes the final enriched
-    output to a results CSV — all in one command.
+    autonomous pipeline. Reads raw lead CSV, scrapes each website, qualifies +
+    scores the lead via AI (Phase 1), generates a personalized pitch (Phase 2,
+    only if Phase 1 passes), and writes the final enriched output to a results
+    CSV — all in one command.
 
 Architecture Reference:
     .antigravity_env/agents.md   — Multi-Agent system contract
     .antigravity_env/custom_rules.md — Core directives (Zero-Cost, Self-Healing)
+    .antigravity_env/decisions.md    — ADR-001, ADR-003, ADR-007 enforced here
+    .antigravity_env/error_log.md    — BUG-001 fixed in this revision
 
 Design Principles (per custom_rules.md):
-    - ZERO-COST: No paid services invoked. Gemini free tier used for AI.
+    - ZERO-COST: No paid services. Multi-key free-tier rotation.
     - SELF-HEALING: Each lead is wrapped in try/except — one failure never
       crashes the entire pipeline. Failed leads are written with error markers.
     - SURGICAL: This file only orchestrates. No business logic lives here.
@@ -21,22 +24,39 @@ Design Principles (per custom_rules.md):
       preservation (CSV is written per-row, not batched), resumable design.
 
 Usage:
-    # Recommended: Set your API key as an environment variable (never hardcode).
-    $env:GEMINI_API_KEY = "YOUR_KEY_HERE"   # PowerShell
-    set GEMINI_API_KEY=YOUR_KEY_HERE         # CMD
+    # Recommended: set API keys as a comma-separated env var.
+    $env:AI_API_KEYS = "key1,key2,key3"        # PowerShell
+    set AI_API_KEYS=key1,key2,key3              # CMD
+    export AI_API_KEYS="key1,key2,key3"         # bash/zsh
 
     python main.py
+    python main.py --input-csv leads.csv --output-csv enriched.csv
+    python main.py --api-base-url https://api.groq.com/openai/v1/chat/completions \
+                   --model llama-3.3-70b-versatile
 
-    # Or pass the key at runtime (for quick testing only):
-    python main.py YOUR_KEY_HERE
+    # Quick test: pass a single key as the first positional arg.
+    python main.py --api-key YOUR_KEY
 
-Get a free Gemini API key: https://aistudio.google.com/app/apikey
+Free-tier API key sources (per custom_rules.md Tier 1, Directive 1):
+    Groq:        https://console.groq.com/keys
+    Grok (x.ai): https://x.ai/api
+    OpenRouter:  https://openrouter.ai/keys
+    Together AI: https://api.together.xyz
+    Local Ollama: no key needed; --api-base-url http://localhost:11434/v1/chat/completions
+
+Note on verticals:
+    This file currently runs HVAC-only qualification (matches the pre-fix
+    behavior of the original main.py). The Career Coaching toggle and other
+    verticals live in app_ui.py for now. After prompt_templates.md is wired
+    into agent3_brain.py (Roadmap item #5), a --vertical flag will be added
+    here in a separate, surgical prompt. See error_log.md BUG-004.
 
 Author:     Lead Architect via Antigravity Engine
-Version:    1.0.0
+Version:    2.0.0  (BUG-001 fix; multi-key rotation; argparse CLI)
 ================================================================================
 """
 
+import argparse
 import csv
 import logging
 import os
@@ -48,7 +68,7 @@ from datetime import datetime
 # Each agent is imported as a module — no business logic lives in this file.
 from agent1_ingestor import LeadIngestor
 from agent2_scout    import WebScout
-from agent3_brain    import LeadBrain
+from agent3_brain    import LeadBrain, DEFAULT_API_BASE_URL, DEFAULT_MODEL
 
 # ──────────────────────────────────────────────────────────────────────────────
 # LOGGING CONFIGURATION
@@ -71,71 +91,139 @@ logging.basicConfig(
 logger = logging.getLogger("ORCHESTRATOR")
 
 # ──────────────────────────────────────────────────────────────────────────────
-# PIPELINE CONFIGURATION
-# All file paths and runtime settings are defined here in one place.
-# Change these values to repurpose the pipeline for any industry/CSV.
+# DEFAULT PIPELINE CONFIGURATION
+# All defaults defined here. Overridable via CLI flags (see argparse section).
+# Change these to repurpose the CLI for any industry/CSV without editing code.
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Input: Raw leads CSV exported from your CRM or spreadsheet.
-INPUT_CSV = "Hvac Contractors - Sheet1.csv"
+# Default input CSV. Overridable via --input-csv.
+DEFAULT_INPUT_CSV = "leads.csv"
 
-# Output: Enriched leads with AI scores and personalized pitches.
-OUTPUT_CSV = "scored_hvac_leads.csv"
+# Default output CSV. Overridable via --output-csv.
+DEFAULT_OUTPUT_CSV = "scored_leads.csv"
 
 # Output CSV schema — only these fields are written to the final file.
-# Agent fields like 'scraped_content' are used internally but not exported.
-OUTPUT_HEADERS = ["Name", "Email", "Company", "Website", "Lead_Score", "Pitch", "Status"]
+OUTPUT_HEADERS = [
+    "Name", "Email", "Company", "Website",
+    "Lead_Score", "Category", "Summary", "Pitch", "Status",
+]
 
-# Courtesy delay between leads (seconds).
-# Respects AGENT 2's rate-limit needs and AGENT 3's API quota.
-# Do NOT set below 2 — Google and most websites will flag rapid requests.
+# Courtesy delay between leads (seconds). Respects rate limits across
+# AGENT 2 (scraping) and AGENT 3 (LLM API). Do NOT set below 2.
 INTER_LEAD_DELAY = 3
+
+# Default target industry for CLI mode. HVAC matches pre-fix behavior.
+# Will be replaced by --vertical flag once prompt_templates.md is wired in
+# (see error_log.md BUG-004 + context.md Roadmap item #5).
+DEFAULT_TARGET_INDUSTRY = "HVAC Contractors"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI ARGUMENT PARSING
+# ──────────────────────────────────────────────────────────────────────────────
+def parse_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments for the CLI orchestrator.
+
+    All flags are optional — sensible defaults are provided. API keys can
+    come from --api-key (single, for testing) or AI_API_KEYS env var
+    (comma-separated, for production).
+
+    Returns:
+        argparse.Namespace with attributes: input_csv, output_csv,
+        api_base_url, model, api_key, target_industry.
+    """
+    parser = argparse.ArgumentParser(
+        description="Lead Sniper AI — autonomous lead enrichment pipeline (CLI mode).",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "For multi-key rotation, set AI_API_KEYS env var "
+            "(comma-separated keys). For testing, use --api-key."
+        ),
+    )
+    parser.add_argument(
+        "--input-csv",
+        default=DEFAULT_INPUT_CSV,
+        help=f"Path to input leads CSV. Default: {DEFAULT_INPUT_CSV}",
+    )
+    parser.add_argument(
+        "--output-csv",
+        default=DEFAULT_OUTPUT_CSV,
+        help=f"Path to output enriched CSV. Default: {DEFAULT_OUTPUT_CSV}",
+    )
+    parser.add_argument(
+        "--api-base-url",
+        default=DEFAULT_API_BASE_URL,
+        help=f"Full URL to OpenAI-compatible /v1/chat/completions endpoint. Default: {DEFAULT_API_BASE_URL}",
+    )
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"Model identifier supported by the chosen provider. Default: {DEFAULT_MODEL}",
+    )
+    parser.add_argument(
+        "--api-key",
+        default=None,
+        help="Single API key for quick testing. For production, set AI_API_KEYS env var instead.",
+    )
+    parser.add_argument(
+        "--target-industry",
+        default=DEFAULT_TARGET_INDUSTRY,
+        help=f"Industry to qualify leads against. Default: {DEFAULT_TARGET_INDUSTRY}",
+    )
+    return parser.parse_args()
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # API KEY RESOLUTION
-# Priority order (most secure first):
-#   1. Environment variable  GEMINI_API_KEY  (recommended for production)
-#   2. CLI argument          python main.py YOUR_KEY  (for quick testing)
-#   3. Falls back to empty string → AGENT 3 will log a CRITICAL error
-#      and return fallback responses (pipeline still runs, scores will be 0).
-# NEVER hardcode your API key in source files.
+# Priority order (most secure first, multi-key first):
+#   1. AI_API_KEYS env var (comma-separated)  — production, enables rotation
+#   2. --api-key CLI flag (single key)         — quick testing
+#   3. None found                              — log CRITICAL, run with empty pool
+# NEVER hardcode keys.
 # ──────────────────────────────────────────────────────────────────────────────
-def resolve_api_key() -> str:
+def resolve_api_keys(cli_single_key: str | None) -> list[str]:
     """
-    Resolves the Gemini API key from environment variables or CLI arguments.
-    Logs a warning if neither source provides a key so the operator is alerted
-    before the pipeline runs (rather than discovering it mid-batch).
+    Build the API key pool from env var or CLI argument.
+
+    Per ADR-003 (key rotation), the pipeline accepts a list of keys and
+    rotates on 4xx/5xx errors. A single key works (rotation is a no-op),
+    but multi-key is recommended for production.
+
+    Args:
+        cli_single_key: Optional single key passed via --api-key.
 
     Returns:
-        str: The API key, or an empty string if not found.
+        list[str]: Cleaned list of API keys. May be empty.
     """
-    # Priority 1: Environment variable (safest — never ends up in git history)
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if key:
-        logger.info("API key loaded from environment variable GEMINI_API_KEY.")
-        return key
+    # Priority 1: env var with comma-separated keys (multi-key rotation).
+    raw_env = os.environ.get("AI_API_KEYS", "").strip()
+    if raw_env:
+        keys = [k.strip() for k in raw_env.split(",") if k.strip()]
+        if keys:
+            logger.info(
+                "API keys loaded from AI_API_KEYS env var: %d key(s) ready for rotation.",
+                len(keys),
+            )
+            return keys
 
-    # Priority 2: CLI argument (convenient for local testing)
-    if len(sys.argv) > 1:
-        key = sys.argv[1].strip()
-        if key:
-            logger.info("API key loaded from CLI argument.")
-            return key
+    # Priority 2: single key from CLI flag.
+    if cli_single_key and cli_single_key.strip():
+        logger.info("Single API key loaded from --api-key flag (no rotation).")
+        return [cli_single_key.strip()]
 
-    # Priority 3: No key found
-    logger.warning(
-        "No GEMINI_API_KEY found. "
-        "Set it with: $env:GEMINI_API_KEY='YOUR_KEY' (PowerShell) "
-        "or set GEMINI_API_KEY=YOUR_KEY (CMD). "
-        "Pipeline will run but AI scoring will return fallback values."
+    # Priority 3: nothing found.
+    logger.critical(
+        "No API keys found. Set AI_API_KEYS env var (comma-separated) "
+        "or pass --api-key. AGENT 3 will return fallback responses and "
+        "all leads will score 0."
     )
-    return ""
+    return []
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # HELPER: build_output_row
 # Maps a fully-enriched lead dict to exactly the OUTPUT_HEADERS schema.
-# Isolates the CSV write format from the rest of the pipeline logic.
 # ──────────────────────────────────────────────────────────────────────────────
 def build_output_row(lead: dict, status: str = "OK") -> dict:
     """
@@ -154,6 +242,8 @@ def build_output_row(lead: dict, status: str = "OK") -> dict:
         "Company":    lead.get("Company", "N/A"),
         "Website":    lead.get("Website", "N/A"),
         "Lead_Score": lead.get("lead_score", 0),
+        "Category":   lead.get("category", "Unknown"),
+        "Summary":    lead.get("summary", "N/A"),
         "Pitch":      lead.get("pitch", "N/A"),
         "Status":     status,
     }
@@ -162,53 +252,56 @@ def build_output_row(lead: dict, status: str = "OK") -> dict:
 # ──────────────────────────────────────────────────────────────────────────────
 # MAIN PIPELINE FUNCTION
 # ──────────────────────────────────────────────────────────────────────────────
-def run_pipeline(api_key: str) -> None:
+def run_pipeline(args: argparse.Namespace, api_keys: list[str]) -> None:
     """
-    Executes the full 3-agent lead enrichment pipeline end-to-end.
+    Executes the full 3-agent two-phase enrichment pipeline end-to-end.
 
     Pipeline Flow:
         1. AGENT 1 reads and validates the input CSV.
         2. For each validated lead:
-            a. AGENT 2 scrapes the lead's website.
-            b. AGENT 3 scores the lead and generates a pitch.
-            c. The enriched row is written to the output CSV immediately
-               (partial results are preserved even if the pipeline crashes).
-        3. A final summary is printed to the console and logged.
+            a. AGENT 2 scrapes the lead's website (with verification signals).
+            b. AGENT 3 Phase 1: qualify + score against target industry.
+            c. AGENT 3 Phase 2: generate pitch (only if Phase 1 passed).
+            d. The enriched row is written immediately (per-row flush, ADR-007).
+        3. A final summary is printed to console and logged.
 
-    Self-Healing:
+    Self-Healing (per custom_rules.md Tier 1, Directive 4):
         Each lead is wrapped in a try/except block. A failure on any single
         lead logs a WARNING and writes a "FAILED" status row to the CSV,
         then continues to the next lead. The pipeline is never aborted by
         a single bad record.
 
     Args:
-        api_key (str): Google Gemini API key for AGENT 3.
+        args:     Parsed CLI arguments (input_csv, output_csv, api_base_url, model, target_industry).
+        api_keys: List of API keys for AGENT 3 rotation (per ADR-003).
     """
     run_start = datetime.now()
 
     logger.info("=" * 70)
     logger.info("  LEAD SNIPER — PIPELINE START")
-    logger.info("  Run ID   : %s", run_start.strftime("%Y%m%d_%H%M%S"))
-    logger.info("  Input    : %s", INPUT_CSV)
-    logger.info("  Output   : %s", OUTPUT_CSV)
-    logger.info("  AI Key   : %s", "SET ✓" if api_key else "MISSING ✗ (scores will be 0)")
+    logger.info("  Run ID         : %s", run_start.strftime("%Y%m%d_%H%M%S"))
+    logger.info("  Input CSV      : %s", args.input_csv)
+    logger.info("  Output CSV     : %s", args.output_csv)
+    logger.info("  Target Industry: %s", args.target_industry)
+    logger.info("  AI Provider    : %s", args.api_base_url)
+    logger.info("  AI Model       : %s", args.model)
+    logger.info("  API Keys Loaded: %d", len(api_keys))
     logger.info("=" * 70)
 
-    # ── INIT AGENTS ───────────────────────────────────────────────────────────
     ingestor = LeadIngestor()
     scout    = WebScout()
     brain    = LeadBrain()
 
     # ── AGENT 1: INGEST ───────────────────────────────────────────────────────
-    logger.info("► AGENT 1: Reading and validating leads from '%s'...", INPUT_CSV)
-    validated_leads = ingestor.ingest_csv(INPUT_CSV)
+    logger.info("► AGENT 1: Reading and validating leads from '%s'...", args.input_csv)
+    validated_leads = ingestor.ingest_csv(args.input_csv)
 
     if not validated_leads:
         logger.critical(
             "CRITICAL — AGENT 1 returned zero valid leads. "
             "Check '%s' exists and contains rows with valid Website URLs. "
             "Pipeline aborted.",
-            INPUT_CSV,
+            args.input_csv,
         )
         scout.close()
         return
@@ -217,28 +310,30 @@ def run_pipeline(api_key: str) -> None:
     logger.info("✓ AGENT 1 complete. %d validated leads ready for processing.\n", total)
 
     # ── TRACKING COUNTERS ─────────────────────────────────────────────────────
-    success_count = 0
-    failed_count  = 0
+    success_count      = 0
+    qualified_count    = 0
+    disqualified_count = 0
+    failed_count       = 0
 
     # ── OPEN OUTPUT CSV ───────────────────────────────────────────────────────
     # File is opened once and kept open for the duration of the loop.
-    # Each row is flushed immediately so partial results survive crashes.
+    # Each row is flushed immediately so partial results survive crashes (ADR-007).
     try:
-        output_file = open(OUTPUT_CSV, mode="w", newline="", encoding="utf-8")
+        output_file = open(args.output_csv, mode="w", newline="", encoding="utf-8")
         writer = csv.DictWriter(output_file, fieldnames=OUTPUT_HEADERS)
         writer.writeheader()
-        logger.info("► Output CSV initialized: '%s'", OUTPUT_CSV)
+        logger.info("► Output CSV initialized: '%s'", args.output_csv)
     except OSError as file_err:
         logger.critical(
             "CRITICAL — Cannot open output file '%s': %s. Pipeline aborted.",
-            OUTPUT_CSV, file_err,
+            args.output_csv, file_err,
         )
         scout.close()
         return
 
     # ── MAIN PROCESSING LOOP ─────────────────────────────────────────────────
     logger.info("\n%s", "=" * 70)
-    logger.info("► Starting 3-agent enrichment loop...")
+    logger.info("► Starting 3-agent two-phase enrichment loop...")
     logger.info("%s\n", "=" * 70)
 
     for index, lead in enumerate(validated_leads, start=1):
@@ -251,10 +346,8 @@ def run_pipeline(api_key: str) -> None:
         logger.info("─" * 70)
 
         # ── PER-LEAD SELF-HEALING GUARD ───────────────────────────────────────
-        # Any exception here is caught, logged, and a FAILED row is written.
-        # The pipeline continues to the next lead without interruption.
         try:
-            # ── AGENT 2: SCRAPE ───────────────────────────────────────────────
+            # ── AGENT 2: SCRAPE + VERIFY ──────────────────────────────────────
             logger.info("  AGENT 2 ► Scraping: %s", url)
             scraped_data = scout.scrape_website(
                 url,
@@ -269,7 +362,7 @@ def run_pipeline(api_key: str) -> None:
             lead["person_found_on_page"] = scraped_data.get("person_found_on_page", False)
             lead["person_context"]       = scraped_data.get("person_context", "")
 
-            # Merge scraped fields into the lead dict (single unified object).
+            # Merge scraped fields.
             if "error" in scraped_data:
                 lead["scrape_error"]    = scraped_data["error"]
                 lead["scraped_title"]   = None
@@ -288,38 +381,65 @@ def run_pipeline(api_key: str) -> None:
                     len(scraped_data.get("content", "")),
                 )
 
-            # ── AGENT 3: SCORE & PITCH ────────────────────────────────────────
-            logger.info("  AGENT 3 ► Scoring and generating pitch...")
-            ai_result = brain.analyze_and_pitch(
+            # ── AGENT 3 — PHASE 1: QUALIFY & SUMMARIZE ────────────────────────
+            logger.info("  AGENT 3 (Phase 1) ► Qualifying against '%s'...", args.target_industry)
+            phase1 = brain.qualify_and_summarize(
                 lead_data=lead,
                 scraped_data=lead,
-                api_key=api_key,
+                target_industry=args.target_industry,
+                api_keys=api_keys,
+                api_base_url=args.api_base_url,
+                model_name=args.model,
             )
 
-            lead["lead_score"] = ai_result["lead_score"]
-            lead["pitch"]      = ai_result["pitch"]
+            is_valid = phase1.get("is_valid", False)
+            score    = phase1.get("score", 0)
+            summary  = phase1.get("summary", "Error.")
+            category = phase1.get("category", "Unknown")
+
+            lead["lead_score"] = score
+            lead["summary"]    = summary
+            lead["category"]   = category
+
+            # ── AGENT 3 — PHASE 2: GENERATE PITCH (only for valid leads) ─────
+            if is_valid:
+                logger.info("  AGENT 3 (Phase 2) ► Generating pitch (lead qualified)...")
+                phase2 = brain.generate_pitch(
+                    lead_data=lead,
+                    summary=summary,
+                    api_keys=api_keys,
+                    api_base_url=args.api_base_url,
+                    model_name=args.model,
+                )
+                lead["pitch"] = phase2.get("pitch", "Error generating pitch.")
+                qualified_count += 1
+                row_status = "OK"
+            else:
+                lead["pitch"] = "SKIPPED — Industry mismatch or unverifiable."
+                disqualified_count += 1
+                row_status = "DISQUALIFIED"
+                logger.info("  ⏭️  Skipping pitch — lead failed Phase 1 qualification.")
 
             # ── WRITE TO OUTPUT CSV ───────────────────────────────────────────
-            row = build_output_row(lead, status="OK")
+            row = build_output_row(lead, status=row_status)
             writer.writerow(row)
-            output_file.flush()  # Write immediately — don't buffer
+            output_file.flush()  # Per ADR-007: flush per-row, not batched.
 
             # ── CONSOLE SUCCESS LOG ───────────────────────────────────────────
             success_count += 1
             print(
-                f"\n  ✅  Processed {company} — "
-                f"Score: {lead['lead_score']}/10\n"
-                f"      Pitch: {lead['pitch'][:100]}...\n"
+                f"\n  ✅  {company} — "
+                f"Score: {score}/10 | Category: {category} | "
+                f"{'QUALIFIED' if is_valid else 'DISQUALIFIED'}\n"
+                f"      Pitch: {str(lead['pitch'])[:100]}...\n"
             )
             logger.info(
-                "  ✓ Processed %s | Score: %d/10",
-                company, lead["lead_score"],
+                "  ✓ Processed %s | Score: %s/10 | Valid: %s",
+                company, score, is_valid,
             )
 
         except Exception as lead_error:
             # ── PER-LEAD FAILURE HANDLER ──────────────────────────────────────
-            # The try/except here prevents ONE bad lead from killing the run.
-            # The failed lead is recorded in the CSV with a FAILED status.
             failed_count += 1
             error_message = str(lead_error)
 
@@ -331,8 +451,13 @@ def run_pipeline(api_key: str) -> None:
             try:
                 error_lead = lead.copy()
                 error_lead["lead_score"] = 0
+                error_lead["category"]   = "Error"
+                error_lead["summary"]    = "Processing error — see main.log"
                 error_lead["pitch"]      = "Processing error — see main.log"
-                error_row = build_output_row(error_lead, status=f"FAILED: {error_message[:80]}")
+                error_row = build_output_row(
+                    error_lead,
+                    status=f"FAILED: {error_message[:80]}",
+                )
                 writer.writerow(error_row)
                 output_file.flush()
             except Exception as write_err:
@@ -342,8 +467,6 @@ def run_pipeline(api_key: str) -> None:
                 )
 
         # ── INTER-LEAD COURTESY DELAY ─────────────────────────────────────────
-        # Respect AGENT 2's and AGENT 3's rate limits between each lead.
-        # Skip the delay after the final lead — no point waiting on exit.
         if index < total:
             logger.info(
                 "  ⏳ Waiting %ds before next lead (rate-limit courtesy)...",
@@ -353,7 +476,7 @@ def run_pipeline(api_key: str) -> None:
 
     # ── CLOSE OUTPUT FILE ─────────────────────────────────────────────────────
     output_file.close()
-    logger.info("Output CSV closed and saved: '%s'", OUTPUT_CSV)
+    logger.info("Output CSV closed and saved: '%s'", args.output_csv)
 
     # ── CLOSE SCOUT SESSION ───────────────────────────────────────────────────
     scout.close()
@@ -361,23 +484,27 @@ def run_pipeline(api_key: str) -> None:
     # ── FINAL SUMMARY ─────────────────────────────────────────────────────────
     run_end     = datetime.now()
     elapsed     = run_end - run_start
-    elapsed_str = str(elapsed).split(".")[0]  # HH:MM:SS, no microseconds
+    elapsed_str = str(elapsed).split(".")[0]
 
     logger.info("\n%s", "=" * 70)
     logger.info("  LEAD SNIPER — PIPELINE COMPLETE")
-    logger.info("  Duration   : %s", elapsed_str)
-    logger.info("  Total Leads: %d", total)
-    logger.info("  Successful : %d ✅", success_count)
-    logger.info("  Failed     : %d ✗", failed_count)
-    logger.info("  Output     : %s", OUTPUT_CSV)
+    logger.info("  Duration       : %s", elapsed_str)
+    logger.info("  Total Leads    : %d", total)
+    logger.info("  Processed OK   : %d ✅", success_count)
+    logger.info("  Qualified      : %d 🎯", qualified_count)
+    logger.info("  Disqualified   : %d ⏭", disqualified_count)
+    logger.info("  Failed         : %d ✗", failed_count)
+    logger.info("  Output         : %s", args.output_csv)
     logger.info("%s\n", "=" * 70)
 
     print("\n" + "=" * 70)
     print(f"  🎯 LEAD SNIPER COMPLETE")
-    print(f"  ✅  Processed : {success_count}/{total} leads")
-    print(f"  ✗   Failed    : {failed_count}/{total} leads")
-    print(f"  ⏱   Duration  : {elapsed_str}")
-    print(f"  📄  Output    : {OUTPUT_CSV}")
+    print(f"  ✅  Processed   : {success_count}/{total} leads")
+    print(f"  🎯 Qualified   : {qualified_count}/{total} leads")
+    print(f"  ⏭  Disqualified: {disqualified_count}/{total} leads")
+    print(f"  ✗  Failed      : {failed_count}/{total} leads")
+    print(f"  ⏱  Duration    : {elapsed_str}")
+    print(f"  📄 Output      : {args.output_csv}")
     print("=" * 70 + "\n")
 
 
@@ -385,5 +512,6 @@ def run_pipeline(api_key: str) -> None:
 # ENTRY POINT
 # ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    api_key = resolve_api_key()
-    run_pipeline(api_key)
+    args = parse_args()
+    api_keys = resolve_api_keys(cli_single_key=args.api_key)
+    run_pipeline(args, api_keys)

@@ -79,13 +79,16 @@ DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 # Default API base URL — override via parameter or environment variable.
 # This should point to any OpenAI-compatible /v1/chat/completions endpoint.
+# Default is Groq because the default model (llama-3.3-70b-versatile) is a
+# Groq-supported model. Pairing this with any other provider would 400 immediately.
+# See error_log.md BUG-003 for the historical mismatch this fixes.
 # Examples:
-#   Grok:        https://api.x.ai/v1/chat/completions
-#   Groq:        https://api.groq.com/openai/v1/chat/completions
+#   Groq:        https://api.groq.com/openai/v1/chat/completions  ← default, pairs with Llama
+#   Grok:        https://api.x.ai/v1/chat/completions             (use grok-3-mini etc.)
 #   OpenRouter:  https://openrouter.ai/api/v1/chat/completions
 #   Together AI: https://api.together.xyz/v1/chat/completions
 #   Ollama:      http://localhost:11434/v1/chat/completions
-DEFAULT_API_BASE_URL = "https://api.x.ai/v1/chat/completions"
+DEFAULT_API_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # AI request timeout in seconds.
 AI_REQUEST_TIMEOUT = 30
@@ -501,6 +504,7 @@ class LeadBrain:
         api_base_url:    str = DEFAULT_API_BASE_URL,
         model_name:      str = DEFAULT_MODEL,
         is_career_coaching: bool = False,
+        min_score:       int = 5,
     ) -> dict:
         """
         Phase 1 — Industry Qualification, Scoring & Summarization.
@@ -768,8 +772,11 @@ Return ONLY a raw JSON object:
                         score = 6
                         summary += " [Capped: person not on website]"
 
-            # Enforce is_valid based on final capped score
-            is_valid = score >= 5
+            # Enforce is_valid based on final capped score and user-configured threshold.
+            # Default min_score=5 matches the original hardcoded behavior. UI exposes a slider
+            # for per-run tuning (see app_ui.py Settings page). Verticals all use the same
+            # threshold per custom_rules.md Rule 5 (No Hardcoded Verticals).
+            is_valid = score >= min_score
 
         category = str(result.get("category", "Unknown")).strip() or "Unknown"
 

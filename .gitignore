@@ -1,0 +1,82 @@
+# ── Python ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ── Virtual Environments ───────────────────────────────
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ── Secrets & Config ───────────────────────────────────
+.env
+.env.local
+.env.*.local
+settings.json
+*.key
+*.pem
+secrets.json
+credentials.json
+
+# ── Logs ───────────────────────────────────────────────
+*.log
+logs/
+agent1_ingestor.log
+agent2_scout.log
+agent3_brain.log
+main.log
+
+# ── Lead Sniper Runtime Artifacts ──────────────────────
+.leads_history.csv
+validated_leads.json
+enriched_leads.json
+final_leads.json
+scored_*.csv
+qualified_leads_*.csv
+lead_sniper_final_*.csv
+
+# ── IDE / Editor ───────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Streamlit ──────────────────────────────────────────
+.streamlit/secrets.toml
+
+# ── Testing & Coverage ─────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+
+# ── Dev Scratch (project-specific) ─────────────────────
+scratch/
+*.tmp
+*.bak

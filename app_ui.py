@@ -559,9 +559,9 @@ if "api_keys_raw" not in st.session_state:
 if "api_keys_list" not in st.session_state:
     st.session_state.api_keys_list = loaded_settings.get("api_keys_list", [""])
 if "selected_provider" not in st.session_state:
-    st.session_state.selected_provider = loaded_settings.get("selected_provider", "Grok (x.ai)")
+    st.session_state.selected_provider = loaded_settings.get("selected_provider", "Groq")
 if "api_base_url" not in st.session_state:
-    st.session_state.api_base_url = loaded_settings.get("api_base_url", "https://api.x.ai/v1/chat/completions")
+    st.session_state.api_base_url = loaded_settings.get("api_base_url", "https://api.groq.com/openai/v1/chat/completions")
 if "model_name" not in st.session_state:
     st.session_state.model_name = loaded_settings.get("model_name", "llama-3.3-70b-versatile")
 if "target_industry" not in st.session_state:
@@ -570,6 +570,8 @@ if "is_career_coaching" not in st.session_state:
     st.session_state.is_career_coaching = loaded_settings.get("is_career_coaching", False)
 if "delay_seconds" not in st.session_state:
     st.session_state.delay_seconds = loaded_settings.get("delay_seconds", 2)
+if "min_qualification_score" not in st.session_state:
+    st.session_state.min_qualification_score = loaded_settings.get("min_qualification_score", 5)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -686,12 +688,20 @@ if nav_selection == "⚙️ Settings":
         help="If checked, agents will qualify leads as Career Coaches and verify data to return a summary with score.",
     )
 
-    st.session_state.delay_seconds = st.slider(
+    st.session_state.min_qualification_score = st.slider(
         "Minimum Qualification Score",
         min_value=1,
         max_value=10,
+        value=st.session_state.min_qualification_score,
+        help="Leads scoring below this threshold are marked invalid and skip pitch generation. Default 5 matches the original hardcoded threshold.",
+    )
+
+    st.session_state.delay_seconds = st.slider(
+        "Inter-Lead Delay (seconds)",
+        min_value=1,
+        max_value=10,
         value=st.session_state.delay_seconds,
-        help="Courtesy delay between API calls to respect rate limits.",
+        help="Courtesy delay between leads to respect API and scraping rate limits. Increase if you hit 429 errors frequently.",
     )
 
     st.markdown('</div>', unsafe_allow_html=True)
@@ -717,6 +727,7 @@ if nav_selection == "⚙️ Settings":
             "target_industry": st.session_state.target_industry,
             "is_career_coaching": st.session_state.is_career_coaching,
             "delay_seconds": st.session_state.delay_seconds,
+            "min_qualification_score": st.session_state.min_qualification_score,
         }
         save_settings(settings_to_save)
         st.success("Settings saved successfully! They will automatically load next time.")
@@ -735,6 +746,7 @@ model_name = st.session_state.model_name
 target_industry = st.session_state.target_industry
 is_career_coaching = st.session_state.is_career_coaching
 delay_seconds = st.session_state.delay_seconds
+min_qualification_score = st.session_state.min_qualification_score
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1235,6 +1247,7 @@ if (qualify_clicked or continue_clicked) and api_keys:
                 api_base_url=api_base_url,
                 model_name=model_name,
                 is_career_coaching=is_career_coaching,
+                min_score=min_qualification_score,
             )
 
             is_valid = p1_result.get("is_valid", False)
